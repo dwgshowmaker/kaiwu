@@ -17,7 +17,15 @@ from agent_diy.conf.conf import Config
 
 ObsData = create_cls("ObsData", feature=None, legal_action=None, safe_action=None, danger_level=None)
 
-ActData = create_cls("ActData", action=None, d_action=None, prob=None, value=None)
+ActData = create_cls(
+    "ActData",
+    action=None,
+    d_action=None,
+    prob=None,
+    value=None,
+    safe_prior_used=None,
+    safe_action_used=None,
+)
 
 SampleData = create_cls(
     "SampleData",

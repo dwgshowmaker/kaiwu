@@ -88,11 +88,15 @@ class EpisodeRunner:
             total_reward = 0.0
             min_dist_sum = 0.0
             min_dist_count = 0
+            safe_prior_count = 0
+            safe_action_count = 0
 
             self.logger.info(f"Episode {self.episode_cnt} start")
 
             while not done:
                 act_data = self.agent.predict(list_obs_data=[obs_data])[0]
+                safe_prior_count += int(getattr(act_data, "safe_prior_used", 0) or 0)
+                safe_action_count += int(getattr(act_data, "safe_action_used", 0) or 0)
                 act = self.agent.action_process(act_data)
 
                 env_reward, env_obs = self.env.step(act)
@@ -132,7 +136,12 @@ class EpisodeRunner:
                         f"treasure:{env_info.get('treasures_collected', 0)} "
                         f"buff:{env_info.get('collected_buff', 0)} "
                         f"stuck:{_remain_info.get('stuck_count', 0)} "
-                        f"danger:{float(_remain_info.get('danger_level', 0.0)):.3f}"
+                        f"blocked:{_remain_info.get('blocked_count', 0)} "
+                        f"danger:{float(_remain_info.get('danger_level', 0.0)):.3f} "
+                        f"danger_steps:{_remain_info.get('danger_steps', 0)} "
+                        f"near_death:{_remain_info.get('near_death_count', 0)} "
+                        f"safe_prior:{safe_prior_count} "
+                        f"safe_action:{safe_action_count}"
                     )
 
                 frame = SampleData(
@@ -167,7 +176,12 @@ class EpisodeRunner:
                             "fail_rate": 1.0 if terminated else 0.0,
                             "avg_min_monster_dist": round(avg_min_monster_dist, 4),
                             "stuck_count": int(_remain_info.get("stuck_count", 0)),
+                            "blocked_count": int(_remain_info.get("blocked_count", 0)),
                             "danger_level": round(float(_remain_info.get("danger_level", 0.0)), 4),
+                            "danger_steps": int(_remain_info.get("danger_steps", 0)),
+                            "near_death_count": int(_remain_info.get("near_death_count", 0)),
+                            "safe_prior_count": safe_prior_count,
+                            "safe_action_count": safe_action_count,
                         }
                         self.monitor.put_data({os.getpid(): monitor_data})
                         self.last_report_monitor_time = now

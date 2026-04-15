@@ -164,6 +164,56 @@ def build_monitor():
             expr="avg(danger_level{})",
         )
         .end_panel()
+        .add_panel(
+            name="blocked_count",
+            name_en="blocked_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="blocked_count",
+            expr="avg(blocked_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="danger_steps",
+            name_en="danger_steps",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="danger_steps",
+            expr="avg(danger_steps{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="near_death_count",
+            name_en="near_death_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="near_death_count",
+            expr="avg(near_death_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="safe_prior_count",
+            name_en="safe_prior_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="safe_prior_count",
+            expr="avg(safe_prior_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="safe_action_count",
+            name_en="safe_action_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="safe_action_count",
+            expr="avg(safe_action_count{})",
+        )
+        .end_panel()
         .end_group()
         .build()
     )

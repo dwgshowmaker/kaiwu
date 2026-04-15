@@ -57,10 +57,11 @@ class Agent(BaseAgent):
         legal_action = list_obs_data[0].legal_action
 
         logits, value, prob = self._run_model(feature, legal_action)
-        prob = self._apply_safety_prior(prob, list_obs_data[0])
+        prob, safe_prior_used = self._apply_safety_prior(prob, list_obs_data[0])
 
         action = self._legal_sample(prob, use_max=False)
         d_action = self._select_greedy_action(prob, list_obs_data[0])
+        safe_action = int(getattr(list_obs_data[0], "safe_action", -1))
 
         return [
             ActData(
@@ -68,6 +69,8 @@ class Agent(BaseAgent):
                 d_action=[d_action],
                 prob=list(prob),
                 value=value,
+                safe_prior_used=int(safe_prior_used),
+                safe_action_used=int(safe_prior_used and action == safe_action),
             )
         ]
 
@@ -158,7 +161,7 @@ class Agent(BaseAgent):
         safe_action = int(getattr(obs_data, "safe_action", -1))
         danger_level = float(getattr(obs_data, "danger_level", 0.0))
         if danger_level < 0.25 or not (0 <= safe_action < len(probs)):
-            return probs
+            return probs, False
 
         prior_weight = min(0.6, 0.15 + 0.45 * danger_level)
         prior = np.zeros_like(probs, dtype=np.float32)
@@ -166,5 +169,5 @@ class Agent(BaseAgent):
         mixed = (1.0 - prior_weight) * np.array(probs, dtype=np.float32) + prior_weight * prior
         mixed_sum = np.sum(mixed)
         if mixed_sum <= 1e-8:
-            return probs
-        return mixed / mixed_sum
+            return probs, False
+        return mixed / mixed_sum, True

@@ -27,6 +27,8 @@ MAX_DIRECTIONAL_BUCKET = 5.0
 LOCAL_MAP_SIZE = 7
 CLOSE_THREAT_DISTANCE = 8.0
 DANGER_PRIOR_DISTANCE = 18.0
+ESCAPE_LOOKAHEAD_STEPS = 3
+BLOCKED_ACTION_COOLDOWN = 4
 
 DIRECTION_TO_VECTOR = {
     0: (0.0, 0.0),
@@ -92,6 +94,11 @@ class Preprocessor:
         self.last_flash_count = 0
         self.stuck_steps = 0
         self.total_stuck_count = 0
+        self.blocked_action_cooldowns = [0] * Config.ACTION_NUM
+        self.blocked_this_step = 0
+        self.total_blocked_count = 0
+        self.danger_steps = 0
+        self.near_death_count = 0
 
     def feature_process(self, env_obs, last_action):
         """Process env_obs into feature vector, legal_action mask, reward and metrics."""
@@ -137,6 +144,7 @@ class Preprocessor:
         map_feat = self._build_local_map_features(map_info)
         legal_action = self._build_legal_action(legal_act_raw)
         progress_feat = self._build_progress_features(env_info)
+        self._update_navigation_memory(hero_pos=(hero_x, hero_z), last_action=last_action)
 
         feature = np.concatenate(
             [
@@ -155,7 +163,7 @@ class Preprocessor:
                 f"Feature length mismatch: got {len(feature)}, expected {Config.DIM_OF_OBSERVATION}"
             )
 
-        safe_action, danger_level = self._select_safe_action(
+        safe_action, danger_level, safe_action_score, safe_path_len = self._select_safe_action(
             closest_monster_rel=closest_monster_rel,
             min_monster_dist=min_monster_dist,
             map_info=map_info,
@@ -172,6 +180,8 @@ class Preprocessor:
         )
         metrics["safe_action"] = float(safe_action)
         metrics["danger_level"] = float(danger_level)
+        metrics["safe_action_score"] = float(safe_action_score)
+        metrics["safe_path_len"] = float(safe_path_len)
 
         return feature, legal_action, reward, metrics
 
@@ -364,9 +374,24 @@ class Preprocessor:
             return 0.5
         return _norm(max(interval - self.step_no, 0), interval)
 
+    def _update_navigation_memory(self, hero_pos, last_action):
+        self.blocked_this_step = 0
+        for idx, cooldown in enumerate(self.blocked_action_cooldowns):
+            if cooldown > 0:
+                self.blocked_action_cooldowns[idx] = cooldown - 1
+
+        action = int(last_action)
+        if not self.has_last_state or not (0 <= action < len(self.blocked_action_cooldowns)):
+            return
+
+        if self.last_hero_pos == hero_pos:
+            self.blocked_this_step = 1
+            self.total_blocked_count += 1
+            self.blocked_action_cooldowns[action] = BLOCKED_ACTION_COOLDOWN
+
     def _select_safe_action(self, closest_monster_rel, min_monster_dist, map_info, legal_action):
         if closest_monster_rel is None or min_monster_dist > DANGER_PRIOR_DISTANCE:
-            return -1, 0.0
+            return -1, 0.0, 0.0, 0.0
 
         escape_dx = -closest_monster_rel[0]
         escape_dz = -closest_monster_rel[1]
@@ -375,22 +400,95 @@ class Preprocessor:
 
         best_action = -1
         best_score = -1e9
+        best_path_len = 0
         for action, move in ACTION_TO_VECTOR.items():
             if action >= len(legal_action) or not legal_action[action]:
                 continue
 
             move_dx, move_dz = move
-            move_norm = max(_distance(move_dx, move_dz), 1e-6)
-            escape_alignment = (move_dx * escape_dx + move_dz * escape_dz) / (move_norm * escape_norm)
-            passable_bonus = 0.2 if self._is_adjacent_passable(map_info, move_dx, move_dz) else -0.4
-            score = escape_alignment + passable_bonus
+            score, path_len = self._score_escape_action(
+                map_info=map_info,
+                action=action,
+                move_dx=move_dx,
+                move_dz=move_dz,
+                closest_monster_rel=closest_monster_rel,
+                min_monster_dist=min_monster_dist,
+                escape_dx=escape_dx,
+                escape_dz=escape_dz,
+                escape_norm=escape_norm,
+                danger_level=danger_level,
+            )
             if score > best_score:
                 best_score = score
                 best_action = action
+                best_path_len = path_len
 
-        return best_action, danger_level
+        return best_action, danger_level, best_score, best_path_len
+
+    def _score_escape_action(
+        self,
+        map_info,
+        action,
+        move_dx,
+        move_dz,
+        closest_monster_rel,
+        min_monster_dist,
+        escape_dx,
+        escape_dz,
+        escape_norm,
+        danger_level,
+    ):
+        move_norm = max(_distance(move_dx, move_dz), 1e-6)
+        escape_alignment = (move_dx * escape_dx + move_dz * escape_dz) / (move_norm * escape_norm)
+
+        after_dx = closest_monster_rel[0] - move_dx
+        after_dz = closest_monster_rel[1] - move_dz
+        dist_gain = _distance(after_dx, after_dz) - min_monster_dist
+
+        path_len = self._escape_corridor_len(map_info, move_dx, move_dz)
+        open_neighbors = self._local_open_count(map_info, move_dx, move_dz)
+        is_passable = self._is_adjacent_passable(map_info, move_dx, move_dz)
+
+        blocked_cooldown = self.blocked_action_cooldowns[action]
+        passable_score = 1.0 if is_passable else -6.0
+        dead_end_penalty = 0.0 if path_len >= 2 else -1.5 * danger_level
+
+        score = (
+            1.4 * dist_gain
+            + 1.1 * escape_alignment
+            + 0.45 * path_len
+            + 0.12 * open_neighbors
+            + passable_score
+            + dead_end_penalty
+            - 0.55 * blocked_cooldown
+        )
+        return score, path_len
+
+    def _escape_corridor_len(self, map_info, dx, dz):
+        if map_info is None or len(map_info) == 0:
+            return ESCAPE_LOOKAHEAD_STEPS
+
+        corridor_len = 0
+        for step in range(1, ESCAPE_LOOKAHEAD_STEPS + 1):
+            if not self._is_offset_passable(map_info, dx * step, dz * step):
+                break
+            corridor_len += 1
+        return corridor_len
+
+    def _local_open_count(self, map_info, dx, dz):
+        if map_info is None or len(map_info) == 0:
+            return 8
+
+        open_count = 0
+        for ndx, ndz in ACTION_TO_VECTOR.values():
+            if self._is_offset_passable(map_info, dx + ndx, dz + ndz):
+                open_count += 1
+        return open_count
 
     def _is_adjacent_passable(self, map_info, dx, dz):
+        return self._is_offset_passable(map_info, dx, dz)
+
+    def _is_offset_passable(self, map_info, dx, dz):
         if map_info is None or len(map_info) == 0:
             return True
         center_row = len(map_info) // 2
@@ -407,6 +505,10 @@ class Preprocessor:
         flash_count = int(env_info.get("flash_count", 0))
 
         reward = 0.02
+        if danger_level >= 0.25:
+            self.danger_steps += 1
+        if min_monster_dist <= 5.0:
+            self.near_death_count += 1
 
         if self.has_last_state:
             dist_delta = min_monster_dist - self.last_min_monster_dist
@@ -428,6 +530,9 @@ class Preprocessor:
                 self.total_stuck_count += 1
                 reward -= 0.08 * min(self.stuck_steps, 5)
 
+            if self.blocked_this_step:
+                reward -= 0.14 if danger_level >= 0.25 else 0.06
+
             if min_monster_dist <= 2.0:
                 reward -= 0.2
             elif min_monster_dist <= 5.0:
@@ -446,6 +551,10 @@ class Preprocessor:
             "buff_count": float(buff_count),
             "flash_count": float(flash_count),
             "stuck_count": float(self.total_stuck_count),
+            "blocked_count": float(self.total_blocked_count),
+            "blocked_this_step": float(self.blocked_this_step),
+            "danger_steps": float(self.danger_steps),
+            "near_death_count": float(self.near_death_count),
             "total_score": float(env_info.get("total_score", 0.0)),
             "danger_level": float(danger_level),
         }

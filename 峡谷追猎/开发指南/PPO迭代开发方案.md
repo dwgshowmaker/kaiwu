@@ -278,6 +278,7 @@ Phase 1 已采用 **105 维** 特征，仍保持轻量 MLP 可承受的规模，
 | `good_flash_reward`    | `+0.3 ~ +0.8`           | 闪现后危险显著下降时奖励     |
 | `bad_flash_penalty`    | `-0.1 ~ -0.3`           | 浪费闪现时惩罚               |
 | `stuck_penalty`        | `-0.08 * stuck_steps`   | 连续原地踏步或撞墙时惩罚     |
+| `blocked_action_penalty` | 危险时 `-0.14`，非危险时 `-0.06` | 最近动作导致原地不动时惩罚 |
 | `fail_penalty`         | `-10.0`                 | 被抓到的终局惩罚             |
 | `complete_bonus`       | `+8.0 ~ +10.0`          | 存活到结束的奖励             |
 
@@ -308,14 +309,15 @@ Phase 1 已采用 **105 维** 特征，仍保持轻量 MLP 可承受的规模，
 - 失败主要发生在策略层面，早期随机策略大量在 30 步内被抓
 - 当前样本的平均存活步数偏低，宝箱和 buff 获取率也偏低，说明“先活下来”仍是 Phase 1 的第一优先级
 
-因此 Phase 1 增加一个轻量安全动作先验：
+因此 Phase 1 增加一个轻量安全动作先验，并在 Phase 1.1 升级为短视野逃生规划：
 
 - `Preprocessor` 根据最近怪物相对位置、合法动作和相邻格通行性计算 `safe_action`
+- Phase 1.1 中，`safe_action` 不再只看一步方向，而是同时评估后续 3 格通路长度、目标格局部开阔度、走后与最近怪物的距离变化，以及最近撞墙动作的冷却惩罚
 - `danger_level` 只在最近怪物距离进入危险阈值时大于 0
 - `Agent.predict()` 仅在 `danger_level >= 0.25` 时把策略概率与 `safe_action` 先验混合
 - 先验最大权重为 `0.6`，目的是帮 PPO 度过早期大量秒死阶段，而不是替代模型决策
 
-同时 `[GAMEOVER]` 日志和监控新增 `danger_level`，方便判断后续失败是否仍集中在贴脸危险状态。
+同时 `[GAMEOVER]` 日志和监控新增 `danger_level`、`blocked_count`、`danger_steps`、`near_death_count`、`safe_prior_count` 和 `safe_action_count`，方便判断后续失败是否仍集中在贴脸危险、撞墙卡住或安全先验未命中的状态。
 
 ### 7. Phase 1 验收标准
 
@@ -340,6 +342,11 @@ Phase 1 已采用 **105 维** 特征，仍保持轻量 MLP 可承受的规模，
 - `avg_min_monster_dist`
 - `stuck_count`
 - `danger_level`
+- `blocked_count`
+- `danger_steps`
+- `near_death_count`
+- `safe_prior_count`
+- `safe_action_count`
 
 ---
 
