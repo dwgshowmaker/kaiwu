@@ -6,24 +6,63 @@
 """
 Author: Tencent AI Arena Authors
 
-Feature preprocessor and reward design for the DIY PPO baseline.
-DIY PPO 基线特征预处理与奖励设计。
+Feature preprocessor and reward design for the DIY PPO agent.
+DIY PPO 智能体特征预处理与奖励设计。
 """
 
 
+import math
+
 import numpy as np
+
+from agent_diy.conf.conf import Config
 
 
 MAP_SIZE = 128.0
+MAX_MAP_DISTANCE = MAP_SIZE * math.sqrt(2.0)
 MAX_MONSTER_SPEED = 5.0
 MAX_FLASH_CD = 2000.0
 MAX_BUFF_DURATION = 50.0
+MAX_DIRECTIONAL_BUCKET = 5.0
+LOCAL_MAP_SIZE = 7
+CLOSE_THREAT_DISTANCE = 8.0
+
+DIRECTION_TO_VECTOR = {
+    0: (0.0, 0.0),
+    1: (1.0, 0.0),
+    2: (1.0, -1.0),
+    3: (0.0, -1.0),
+    4: (-1.0, -1.0),
+    5: (-1.0, 0.0),
+    6: (-1.0, 1.0),
+    7: (0.0, 1.0),
+    8: (1.0, 1.0),
+}
 
 
 def _norm(v, v_max, v_min=0.0):
     """Normalize value to [0, 1]."""
     v = float(np.clip(v, v_min, v_max))
     return (v - v_min) / (v_max - v_min) if (v_max - v_min) > 1e-6 else 0.0
+
+
+def _norm_signed(v, scale):
+    """Normalize signed value to [-1, 1]."""
+    if scale <= 1e-6:
+        return 0.0
+    return float(np.clip(v / scale, -1.0, 1.0))
+
+
+def _distance(dx, dz):
+    return float(math.sqrt(dx * dx + dz * dz))
+
+
+def _safe_pos(pos):
+    if not isinstance(pos, dict):
+        return None
+    if "x" not in pos or "z" not in pos:
+        return None
+    return float(pos["x"]), float(pos["z"])
 
 
 class Preprocessor:
@@ -33,10 +72,17 @@ class Preprocessor:
     def reset(self):
         self.step_no = 0
         self.max_step = 200
-        self.last_min_monster_dist_norm = 0.5
+        self.has_last_state = False
+        self.last_min_monster_dist = MAX_MAP_DISTANCE
+        self.last_hero_pos = None
+        self.last_treasure_count = 0
+        self.last_buff_count = 0
+        self.last_flash_count = 0
+        self.stuck_steps = 0
+        self.total_stuck_count = 0
 
     def feature_process(self, env_obs, last_action):
-        """Process env_obs into feature vector, legal_action mask and reward."""
+        """Process env_obs into feature vector, legal_action mask, reward and metrics."""
         observation = env_obs["observation"]
         frame_state = observation["frame_state"]
         env_info = observation["env_info"]
@@ -44,86 +90,302 @@ class Preprocessor:
         legal_act_raw = observation["legal_action"]
 
         self.step_no = observation["step_no"]
-        self.max_step = env_info.get("max_step", 200)
+        self.max_step = max(1, int(env_info.get("max_step", 200)))
 
         hero = frame_state["heroes"]
         hero_pos = hero["pos"]
-        hero_x_norm = _norm(hero_pos["x"], MAP_SIZE)
-        hero_z_norm = _norm(hero_pos["z"], MAP_SIZE)
-        flash_cd_norm = _norm(hero["flash_cooldown"], MAX_FLASH_CD)
-        buff_remain_norm = _norm(hero["buff_remaining_time"], MAX_BUFF_DURATION)
-        hero_feat = np.array([hero_x_norm, hero_z_norm, flash_cd_norm, buff_remain_norm], dtype=np.float32)
+        hero_x = float(hero_pos["x"])
+        hero_z = float(hero_pos["z"])
 
         monsters = frame_state.get("monsters", [])
-        monster_feats = []
-        for i in range(2):
-            if i < len(monsters):
-                m = monsters[i]
-                is_in_view = float(m.get("is_in_view", 0))
-                m_pos = m["pos"]
-                if is_in_view:
-                    m_x_norm = _norm(m_pos["x"], MAP_SIZE)
-                    m_z_norm = _norm(m_pos["z"], MAP_SIZE)
-                    m_speed_norm = _norm(m.get("speed", 1), MAX_MONSTER_SPEED)
-                    raw_dist = np.sqrt((hero_pos["x"] - m_pos["x"]) ** 2 + (hero_pos["z"] - m_pos["z"]) ** 2)
-                    dist_norm = _norm(raw_dist, MAP_SIZE * 1.41)
-                else:
-                    m_x_norm = 0.0
-                    m_z_norm = 0.0
-                    m_speed_norm = 0.0
-                    dist_norm = 1.0
-                monster_feats.append(
-                    np.array([is_in_view, m_x_norm, m_z_norm, m_speed_norm, dist_norm], dtype=np.float32)
-                )
-            else:
-                monster_feats.append(np.zeros(5, dtype=np.float32))
+        organs = frame_state.get("organs", [])
 
-        map_feat = np.zeros(16, dtype=np.float32)
-        if map_info is not None and len(map_info) >= 13:
-            center = len(map_info) // 2
-            flat_idx = 0
-            for row in range(center - 2, center + 2):
-                for col in range(center - 2, center + 2):
-                    if 0 <= row < len(map_info) and 0 <= col < len(map_info[0]):
-                        map_feat[flat_idx] = float(map_info[row][col] != 0)
-                    flat_idx += 1
-
-        legal_action = [1] * 8
-        if isinstance(legal_act_raw, list) and legal_act_raw:
-            if isinstance(legal_act_raw[0], bool):
-                for j in range(min(8, len(legal_act_raw))):
-                    legal_action[j] = int(legal_act_raw[j])
-            else:
-                valid_set = {int(a) for a in legal_act_raw if int(a) < 8}
-                legal_action = [1 if j in valid_set else 0 for j in range(8)]
-
-        if sum(legal_action) == 0:
-            legal_action = [1] * 8
-
-        step_norm = _norm(self.step_no, self.max_step)
-        survival_ratio = step_norm
-        progress_feat = np.array([step_norm, survival_ratio], dtype=np.float32)
+        monster_feats, min_monster_dist, closest_monster_rel = self._build_monster_features(
+            monsters, hero_x, hero_z
+        )
+        hero_feat = self._build_hero_features(hero, hero_x, hero_z)
+        treasure_feat = self._build_organ_features(
+            organs=organs,
+            hero_x=hero_x,
+            hero_z=hero_z,
+            sub_type=1,
+            closest_monster_rel=closest_monster_rel,
+            is_buff=False,
+        )
+        buff_feat = self._build_organ_features(
+            organs=organs,
+            hero_x=hero_x,
+            hero_z=hero_z,
+            sub_type=2,
+            closest_monster_rel=closest_monster_rel,
+            is_buff=True,
+            has_buff=hero_feat[5] > 0.0,
+            min_monster_dist=min_monster_dist,
+        )
+        map_feat = self._build_local_map_features(map_info)
+        legal_action = self._build_legal_action(legal_act_raw)
+        progress_feat = self._build_progress_features(env_info)
 
         feature = np.concatenate(
             [
                 hero_feat,
-                monster_feats[0],
-                monster_feats[1],
+                monster_feats,
+                treasure_feat,
+                buff_feat,
                 map_feat,
                 np.array(legal_action, dtype=np.float32),
                 progress_feat,
             ]
+        ).astype(np.float32)
+
+        if len(feature) != Config.DIM_OF_OBSERVATION:
+            raise ValueError(
+                f"Feature length mismatch: got {len(feature)}, expected {Config.DIM_OF_OBSERVATION}"
+            )
+
+        reward, metrics = self._calc_reward_and_metrics(
+            env_info=env_info,
+            hero=hero,
+            hero_pos=(hero_x, hero_z),
+            min_monster_dist=min_monster_dist,
+            last_action=last_action,
         )
 
-        cur_min_dist_norm = 1.0
-        for m_feat in monster_feats:
-            if m_feat[0] > 0:
-                cur_min_dist_norm = min(cur_min_dist_norm, m_feat[4])
+        return feature, legal_action, reward, metrics
 
-        survive_reward = 0.01
-        dist_shaping = 0.1 * (cur_min_dist_norm - self.last_min_monster_dist_norm)
-        self.last_min_monster_dist_norm = cur_min_dist_norm
+    def _build_hero_features(self, hero, hero_x, hero_z):
+        flash_cd = float(hero.get("flash_cooldown", 0))
+        buff_remain = float(hero.get("buff_remaining_time", 0))
+        step_norm = _norm(self.step_no, self.max_step)
+        return np.array(
+            [
+                _norm(hero_x, MAP_SIZE),
+                _norm(hero_z, MAP_SIZE),
+                _norm(flash_cd, MAX_FLASH_CD),
+                float(flash_cd <= 0),
+                _norm(buff_remain, MAX_BUFF_DURATION),
+                float(buff_remain > 0),
+                step_norm,
+                1.0 - step_norm,
+            ],
+            dtype=np.float32,
+        )
 
-        reward = [survive_reward + dist_shaping]
+    def _build_monster_features(self, monsters, hero_x, hero_z):
+        features = []
+        min_dist = MAX_MAP_DISTANCE
+        closest_rel = None
 
-        return feature, legal_action, reward
+        for i in range(2):
+            if i >= len(monsters):
+                features.extend([0.0] * 8)
+                continue
+
+            monster = monsters[i]
+            pos = _safe_pos(monster.get("pos"))
+            if pos is not None:
+                dx = pos[0] - hero_x
+                dz = pos[1] - hero_z
+                raw_dist = _distance(dx, dz)
+                dir_x = float(np.sign(dx))
+                dir_z = float(np.sign(dz))
+            else:
+                dir_x, dir_z = DIRECTION_TO_VECTOR.get(
+                    int(monster.get("hero_relative_direction", 0)), (0.0, 0.0)
+                )
+                dist_bucket = float(monster.get("hero_l2_distance", MAX_DIRECTIONAL_BUCKET))
+                raw_dist = (dist_bucket + 0.5) * 30.0
+                dx = dir_x * raw_dist
+                dz = dir_z * raw_dist
+
+            if raw_dist < min_dist:
+                min_dist = raw_dist
+                closest_rel = (dx, dz)
+
+            features.extend(
+                [
+                    1.0,
+                    _norm_signed(dx, MAP_SIZE),
+                    _norm_signed(dz, MAP_SIZE),
+                    _norm(raw_dist, MAX_MAP_DISTANCE),
+                    dir_x,
+                    dir_z,
+                    _norm(monster.get("speed", 1), MAX_MONSTER_SPEED),
+                    float(raw_dist <= CLOSE_THREAT_DISTANCE),
+                ]
+            )
+
+        return np.array(features, dtype=np.float32), min_dist, closest_rel
+
+    def _build_organ_features(
+        self,
+        organs,
+        hero_x,
+        hero_z,
+        sub_type,
+        closest_monster_rel,
+        is_buff,
+        has_buff=False,
+        min_monster_dist=MAX_MAP_DISTANCE,
+    ):
+        candidates = []
+        for organ in organs:
+            if int(organ.get("sub_type", -1)) != sub_type:
+                continue
+            if int(organ.get("status", 1)) != 1:
+                continue
+            pos = _safe_pos(organ.get("pos"))
+            if pos is None:
+                continue
+            dx = pos[0] - hero_x
+            dz = pos[1] - hero_z
+            candidates.append((dx, dz, _distance(dx, dz)))
+
+        candidates.sort(key=lambda item: item[2])
+
+        features = []
+        for idx in range(2):
+            if idx >= len(candidates):
+                features.extend([0.0] * 5)
+                continue
+
+            dx, dz, raw_dist = candidates[idx]
+            if is_buff:
+                utility_flag = float(
+                    (not has_buff) and (min_monster_dist <= 25.0 or self.step_no < self.max_step * 0.7)
+                )
+            else:
+                utility_flag = self._same_escape_quadrant(dx, dz, closest_monster_rel)
+
+            features.extend(
+                [
+                    1.0,
+                    _norm_signed(dx, MAP_SIZE),
+                    _norm_signed(dz, MAP_SIZE),
+                    _norm(raw_dist, MAX_MAP_DISTANCE),
+                    utility_flag,
+                ]
+            )
+
+        return np.array(features, dtype=np.float32)
+
+    def _same_escape_quadrant(self, dx, dz, closest_monster_rel):
+        if closest_monster_rel is None:
+            return 0.0
+        monster_dx, monster_dz = closest_monster_rel
+        escape_dx = -monster_dx
+        escape_dz = -monster_dz
+        dot_value = dx * escape_dx + dz * escape_dz
+        return float(dot_value > 0)
+
+    def _build_local_map_features(self, map_info):
+        map_feat = np.zeros(LOCAL_MAP_SIZE * LOCAL_MAP_SIZE, dtype=np.float32)
+        if map_info is None or len(map_info) == 0:
+            return map_feat
+
+        map_arr = np.array(map_info, dtype=np.float32)
+        if map_arr.ndim != 2 or map_arr.size == 0:
+            return map_feat
+
+        h, w = map_arr.shape
+        flat_idx = 0
+        for row in range(LOCAL_MAP_SIZE):
+            row_start = int(row * h / LOCAL_MAP_SIZE)
+            row_end = max(row_start + 1, int((row + 1) * h / LOCAL_MAP_SIZE))
+            for col in range(LOCAL_MAP_SIZE):
+                col_start = int(col * w / LOCAL_MAP_SIZE)
+                col_end = max(col_start + 1, int((col + 1) * w / LOCAL_MAP_SIZE))
+                block = map_arr[row_start:row_end, col_start:col_end]
+                map_feat[flat_idx] = float(np.mean(block != 0)) if block.size else 0.0
+                flat_idx += 1
+
+        return map_feat
+
+    def _build_legal_action(self, legal_act_raw):
+        action_num = Config.ACTION_NUM
+        legal_action = [1] * action_num
+        if isinstance(legal_act_raw, list) and legal_act_raw:
+            if isinstance(legal_act_raw[0], bool):
+                for idx in range(min(action_num, len(legal_act_raw))):
+                    legal_action[idx] = int(legal_act_raw[idx])
+            else:
+                valid_set = {int(action) for action in legal_act_raw if int(action) < action_num}
+                legal_action = [1 if idx in valid_set else 0 for idx in range(action_num)]
+
+        if sum(legal_action) == 0:
+            legal_action = [1] * action_num
+        return legal_action
+
+    def _build_progress_features(self, env_info):
+        monster_interval = int(env_info.get("monster_interval", 300))
+        monster2_eta = self._eta_norm(monster_interval)
+        speedup_interval = int(env_info.get("monster_speedup", env_info.get("monster_speedup_time", -1)))
+        speedup_eta = self._eta_norm(speedup_interval) if speedup_interval > 0 else 0.5
+
+        total_treasure = max(1, int(env_info.get("total_treasure", 10)))
+        treasure_count = int(env_info.get("treasures_collected", 0))
+        total_buff = max(1, int(env_info.get("total_buff", 2)))
+        buff_count = int(env_info.get("collected_buff", 0))
+
+        return np.array(
+            [
+                monster2_eta,
+                speedup_eta,
+                _norm(treasure_count, total_treasure),
+                _norm(buff_count, total_buff),
+            ],
+            dtype=np.float32,
+        )
+
+    def _eta_norm(self, interval):
+        if interval <= 0:
+            return 0.5
+        return _norm(max(interval - self.step_no, 0), interval)
+
+    def _calc_reward_and_metrics(self, env_info, hero, hero_pos, min_monster_dist, last_action):
+        treasure_count = int(hero.get("treasure_collected_count", env_info.get("treasures_collected", 0)))
+        buff_count = int(env_info.get("collected_buff", 0))
+        flash_count = int(env_info.get("flash_count", 0))
+
+        reward = 0.01
+
+        if self.has_last_state:
+            dist_delta = min_monster_dist - self.last_min_monster_dist
+            reward += 0.03 * float(np.clip(dist_delta, -3.0, 3.0))
+
+            treasure_delta = max(0, treasure_count - self.last_treasure_count)
+            reward += 1.2 * treasure_delta
+
+            buff_delta = max(0, buff_count - self.last_buff_count)
+            reward += (0.7 if min_monster_dist <= 25.0 else 0.5) * buff_delta
+
+            if self.last_hero_pos == hero_pos and 0 <= int(last_action) < 8:
+                self.stuck_steps += 1
+            else:
+                self.stuck_steps = 0
+
+            if self.stuck_steps >= 2:
+                self.total_stuck_count += 1
+                reward -= 0.02 * min(self.stuck_steps, 5)
+
+            if min_monster_dist <= 2.0:
+                reward -= 0.1
+            elif min_monster_dist <= 5.0:
+                reward -= 0.03
+
+        self.has_last_state = True
+        self.last_min_monster_dist = min_monster_dist
+        self.last_hero_pos = hero_pos
+        self.last_treasure_count = treasure_count
+        self.last_buff_count = buff_count
+        self.last_flash_count = flash_count
+
+        metrics = {
+            "min_monster_dist": float(min_monster_dist),
+            "treasure_count": float(treasure_count),
+            "buff_count": float(buff_count),
+            "flash_count": float(flash_count),
+            "stuck_count": float(self.total_stuck_count),
+            "total_score": float(env_info.get("total_score", 0.0)),
+        }
+        return [float(reward)], metrics

@@ -6,21 +6,22 @@
 """
 Author: Tencent AI Arena Authors
 
-Configuration for the DIY PPO baseline.
-DIY PPO 基线配置。
+Configuration for the DIY PPO agent.
+DIY PPO 智能体配置。
 """
 
 
 class Config:
 
-    # Feature dimensions / 特征维度（共40维）
+    # Phase 1 feature dimensions / Phase 1 特征维度（共105维）
     FEATURES = [
-        4,
-        5,
-        5,
-        16,
-        8,
-        2,
+        8,   # hero self
+        16,  # monsters: 2 * 8
+        10,  # treasures: 2 * 5
+        10,  # buffs: 2 * 5
+        49,  # local map: 7 * 7 downsampled from local vision
+        8,   # legal movement actions
+        4,   # progress and environment rhythm
     ]
     FEATURE_SPLIT_SHAPE = FEATURES
     FEATURE_LEN = sum(FEATURE_SPLIT_SHAPE)
@@ -33,7 +34,7 @@ class Config:
     FEATURE_VECTOR_SHAPE = (DIM_OF_OBSERVATION,)
     FEATURE_IMAGE_SHAPE = (4, VIEW_SIZE + 1, VIEW_SIZE + 1)
 
-    # Action space / 动作空间：Phase 0 先保持8个移动方向
+    # Action space / 动作空间：Phase 1 仍保持8个移动方向
     ACTION_NUM = 8
     ACTION_SHAPE = (ACTION_NUM,)
 

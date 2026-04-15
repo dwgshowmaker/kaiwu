@@ -247,20 +247,21 @@
 - `treasure_collected_ratio`
 - `buff_collected_ratio`
 
-### 3. 推荐的第一版总特征规模
+### 3. Phase 1 实际落地特征规模
 
-建议第一版控制在 **60~90 维**，不要一上来膨胀到 200 维以上。
+Phase 1 已采用 **105 维** 特征，仍保持轻量 MLP 可承受的规模，同时比 Phase 0 的 40 维提供更多任务信息。
 
-推荐落地版本：
+实际落地版本：
 
 - hero: 8
 - monsters: 16
 - treasures: 10
 - buffs: 10
-- local route/map: 24
+- local map: 49（21x21 视野下采样为 7x7）
+- legal action: 8
 - progress: 4
 
-总计：**72 维**
+总计：**105 维**
 
 ### 4. 奖励改造方案
 

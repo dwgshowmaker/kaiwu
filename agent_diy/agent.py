@@ -97,12 +97,13 @@ class Agent(BaseAgent):
 
     def observation_process(self, env_obs):
         """Convert raw env_obs to ObsData and remain_info."""
-        feature, legal_action, reward = self.preprocessor.feature_process(env_obs, self.last_action)
+        feature, legal_action, reward, metrics = self.preprocessor.feature_process(env_obs, self.last_action)
         obs_data = ObsData(
             feature=list(feature),
             legal_action=legal_action,
         )
         remain_info = {"reward": reward}
+        remain_info.update(metrics)
         return obs_data, remain_info
 
     def action_process(self, act_data, is_stochastic=True):
