@@ -57,9 +57,10 @@ class Agent(BaseAgent):
         legal_action = list_obs_data[0].legal_action
 
         logits, value, prob = self._run_model(feature, legal_action)
+        prob = self._apply_safety_prior(prob, list_obs_data[0])
 
         action = self._legal_sample(prob, use_max=False)
-        d_action = self._legal_sample(prob, use_max=True)
+        d_action = self._select_greedy_action(prob, list_obs_data[0])
 
         return [
             ActData(
@@ -101,6 +102,8 @@ class Agent(BaseAgent):
         obs_data = ObsData(
             feature=list(feature),
             legal_action=legal_action,
+            safe_action=metrics.get("safe_action", -1),
+            danger_level=metrics.get("danger_level", 0.0),
         )
         remain_info = {"reward": reward}
         remain_info.update(metrics)
@@ -142,3 +145,26 @@ class Agent(BaseAgent):
         if use_max:
             return int(np.argmax(probs))
         return int(np.argmax(np.random.multinomial(1, probs, size=1)))
+
+    def _select_greedy_action(self, probs, obs_data):
+        safe_action = int(getattr(obs_data, "safe_action", -1))
+        danger_level = float(getattr(obs_data, "danger_level", 0.0))
+        if danger_level >= 0.35 and 0 <= safe_action < len(probs):
+            return safe_action
+        return self._legal_sample(probs, use_max=True)
+
+    def _apply_safety_prior(self, probs, obs_data):
+        """Blend model policy with a danger-only escape prior for early PPO stability."""
+        safe_action = int(getattr(obs_data, "safe_action", -1))
+        danger_level = float(getattr(obs_data, "danger_level", 0.0))
+        if danger_level < 0.25 or not (0 <= safe_action < len(probs)):
+            return probs
+
+        prior_weight = min(0.6, 0.15 + 0.45 * danger_level)
+        prior = np.zeros_like(probs, dtype=np.float32)
+        prior[safe_action] = 1.0
+        mixed = (1.0 - prior_weight) * np.array(probs, dtype=np.float32) + prior_weight * prior
+        mixed_sum = np.sum(mixed)
+        if mixed_sum <= 1e-8:
+            return probs
+        return mixed / mixed_sum

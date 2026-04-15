@@ -271,13 +271,13 @@ Phase 1 已采用 **105 维** 特征，仍保持轻量 MLP 可承受的规模，
 
 | 奖励项                   | 建议                      | 说明                         |
 | :----------------------- | :------------------------ | :--------------------------- |
-| `survive_reward`       | `+0.01`                 | 每步基础生存奖励             |
-| `danger_escape_reward` | `0.05 * min_dist_delta` | 与最近怪物拉开距离时给正奖励 |
+| `survive_reward`       | `+0.02`                 | 每步基础生存奖励             |
+| `danger_escape_reward` | 危险时 `0.08 * min_dist_delta`，非危险时 `0.02 * min_dist_delta` | 与最近怪物拉开距离时给正奖励 |
 | `treasure_reward`      | `+1.0 ~ +1.5`           | 宝箱数量增量奖励             |
 | `buff_reward`          | `+0.3 ~ +0.8`           | 收到 buff 时奖励，危险时更高 |
 | `good_flash_reward`    | `+0.3 ~ +0.8`           | 闪现后危险显著下降时奖励     |
 | `bad_flash_penalty`    | `-0.1 ~ -0.3`           | 浪费闪现时惩罚               |
-| `stuck_penalty`        | `-0.02`                 | 连续原地踏步或撞墙时惩罚     |
+| `stuck_penalty`        | `-0.08 * stuck_steps`   | 连续原地踏步或撞墙时惩罚     |
 | `fail_penalty`         | `-10.0`                 | 被抓到的终局惩罚             |
 | `complete_bonus`       | `+8.0 ~ +10.0`          | 存活到结束的奖励             |
 
@@ -300,7 +300,24 @@ Phase 1 已采用 **105 维** 特征，仍保持轻量 MLP 可承受的规模，
 - 单次宝箱奖励可以明显高于一步生存奖励
 - 但不能高到导致模型无视死亡风险
 
-### 6. Phase 1 验收标准
+### 6. Phase 1 日志诊断与修正
+
+对 `D:\kaiwu\kaiwusong\train\log` 的训练日志排查结论：
+
+- 训练链路本身没有明显报错，learner、actor、样本发送和模型同步都在运行
+- 失败主要发生在策略层面，早期随机策略大量在 30 步内被抓
+- 当前样本的平均存活步数偏低，宝箱和 buff 获取率也偏低，说明“先活下来”仍是 Phase 1 的第一优先级
+
+因此 Phase 1 增加一个轻量安全动作先验：
+
+- `Preprocessor` 根据最近怪物相对位置、合法动作和相邻格通行性计算 `safe_action`
+- `danger_level` 只在最近怪物距离进入危险阈值时大于 0
+- `Agent.predict()` 仅在 `danger_level >= 0.25` 时把策略概率与 `safe_action` 先验混合
+- 先验最大权重为 `0.6`，目的是帮 PPO 度过早期大量秒死阶段，而不是替代模型决策
+
+同时 `[GAMEOVER]` 日志和监控新增 `danger_level`，方便判断后续失败是否仍集中在贴脸危险状态。
+
+### 7. Phase 1 验收标准
 
 建议至少观察以下指标：
 
@@ -310,7 +327,7 @@ Phase 1 已采用 **105 维** 特征，仍保持轻量 MLP 可承受的规模，
 - 失败局中是否更少出现“撞墙死”“原地抖动”
 - reward 曲线是否比旧版更稳定
 
-### 7. Phase 1 需要新增的监控项
+### 8. Phase 1 需要新增的监控项
 
 建议在 `agent_diy/conf/monitor_builder.py` 里新增：
 
@@ -322,6 +339,7 @@ Phase 1 已采用 **105 维** 特征，仍保持轻量 MLP 可承受的规模，
 - `fail_rate`
 - `avg_min_monster_dist`
 - `stuck_count`
+- `danger_level`
 
 ---
 

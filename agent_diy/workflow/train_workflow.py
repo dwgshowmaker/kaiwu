@@ -128,7 +128,11 @@ class EpisodeRunner:
                     self.logger.info(
                         f"[GAMEOVER] episode:{self.episode_cnt} steps:{step} "
                         f"result:{result_str} sim_score:{total_score:.1f} "
-                        f"total_reward:{total_reward:.3f}"
+                        f"total_reward:{total_reward:.3f} "
+                        f"treasure:{env_info.get('treasures_collected', 0)} "
+                        f"buff:{env_info.get('collected_buff', 0)} "
+                        f"stuck:{_remain_info.get('stuck_count', 0)} "
+                        f"danger:{float(_remain_info.get('danger_level', 0.0)):.3f}"
                     )
 
                 frame = SampleData(
@@ -163,6 +167,7 @@ class EpisodeRunner:
                             "fail_rate": 1.0 if terminated else 0.0,
                             "avg_min_monster_dist": round(avg_min_monster_dist, 4),
                             "stuck_count": int(_remain_info.get("stuck_count", 0)),
+                            "danger_level": round(float(_remain_info.get("danger_level", 0.0)), 4),
                         }
                         self.monitor.put_data({os.getpid(): monitor_data})
                         self.last_report_monitor_time = now

@@ -154,6 +154,16 @@ def build_monitor():
             expr="avg(stuck_count{})",
         )
         .end_panel()
+        .add_panel(
+            name="危险等级",
+            name_en="danger_level",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="danger_level",
+            expr="avg(danger_level{})",
+        )
+        .end_panel()
         .end_group()
         .build()
     )

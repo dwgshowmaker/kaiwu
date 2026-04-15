@@ -26,6 +26,7 @@ MAX_BUFF_DURATION = 50.0
 MAX_DIRECTIONAL_BUCKET = 5.0
 LOCAL_MAP_SIZE = 7
 CLOSE_THREAT_DISTANCE = 8.0
+DANGER_PRIOR_DISTANCE = 18.0
 
 DIRECTION_TO_VECTOR = {
     0: (0.0, 0.0),
@@ -37,6 +38,17 @@ DIRECTION_TO_VECTOR = {
     6: (-1.0, 1.0),
     7: (0.0, 1.0),
     8: (1.0, 1.0),
+}
+
+ACTION_TO_VECTOR = {
+    0: (1, 0),
+    1: (1, -1),
+    2: (0, -1),
+    3: (-1, -1),
+    4: (-1, 0),
+    5: (-1, 1),
+    6: (0, 1),
+    7: (1, 1),
 }
 
 
@@ -143,13 +155,23 @@ class Preprocessor:
                 f"Feature length mismatch: got {len(feature)}, expected {Config.DIM_OF_OBSERVATION}"
             )
 
+        safe_action, danger_level = self._select_safe_action(
+            closest_monster_rel=closest_monster_rel,
+            min_monster_dist=min_monster_dist,
+            map_info=map_info,
+            legal_action=legal_action,
+        )
+
         reward, metrics = self._calc_reward_and_metrics(
             env_info=env_info,
             hero=hero,
             hero_pos=(hero_x, hero_z),
             min_monster_dist=min_monster_dist,
             last_action=last_action,
+            danger_level=danger_level,
         )
+        metrics["safe_action"] = float(safe_action)
+        metrics["danger_level"] = float(danger_level)
 
         return feature, legal_action, reward, metrics
 
@@ -342,16 +364,54 @@ class Preprocessor:
             return 0.5
         return _norm(max(interval - self.step_no, 0), interval)
 
-    def _calc_reward_and_metrics(self, env_info, hero, hero_pos, min_monster_dist, last_action):
+    def _select_safe_action(self, closest_monster_rel, min_monster_dist, map_info, legal_action):
+        if closest_monster_rel is None or min_monster_dist > DANGER_PRIOR_DISTANCE:
+            return -1, 0.0
+
+        escape_dx = -closest_monster_rel[0]
+        escape_dz = -closest_monster_rel[1]
+        escape_norm = max(_distance(escape_dx, escape_dz), 1e-6)
+        danger_level = 1.0 - _norm(min_monster_dist, DANGER_PRIOR_DISTANCE)
+
+        best_action = -1
+        best_score = -1e9
+        for action, move in ACTION_TO_VECTOR.items():
+            if action >= len(legal_action) or not legal_action[action]:
+                continue
+
+            move_dx, move_dz = move
+            move_norm = max(_distance(move_dx, move_dz), 1e-6)
+            escape_alignment = (move_dx * escape_dx + move_dz * escape_dz) / (move_norm * escape_norm)
+            passable_bonus = 0.2 if self._is_adjacent_passable(map_info, move_dx, move_dz) else -0.4
+            score = escape_alignment + passable_bonus
+            if score > best_score:
+                best_score = score
+                best_action = action
+
+        return best_action, danger_level
+
+    def _is_adjacent_passable(self, map_info, dx, dz):
+        if map_info is None or len(map_info) == 0:
+            return True
+        center_row = len(map_info) // 2
+        center_col = len(map_info[0]) // 2 if len(map_info[0]) > 0 else 0
+        row = center_row + int(dz)
+        col = center_col + int(dx)
+        if row < 0 or row >= len(map_info) or col < 0 or col >= len(map_info[0]):
+            return False
+        return bool(map_info[row][col] != 0)
+
+    def _calc_reward_and_metrics(self, env_info, hero, hero_pos, min_monster_dist, last_action, danger_level):
         treasure_count = int(hero.get("treasure_collected_count", env_info.get("treasures_collected", 0)))
         buff_count = int(env_info.get("collected_buff", 0))
         flash_count = int(env_info.get("flash_count", 0))
 
-        reward = 0.01
+        reward = 0.02
 
         if self.has_last_state:
             dist_delta = min_monster_dist - self.last_min_monster_dist
-            reward += 0.03 * float(np.clip(dist_delta, -3.0, 3.0))
+            dist_weight = 0.08 if danger_level > 0.0 else 0.02
+            reward += dist_weight * float(np.clip(dist_delta, -3.0, 3.0))
 
             treasure_delta = max(0, treasure_count - self.last_treasure_count)
             reward += 1.2 * treasure_delta
@@ -366,12 +426,12 @@ class Preprocessor:
 
             if self.stuck_steps >= 2:
                 self.total_stuck_count += 1
-                reward -= 0.02 * min(self.stuck_steps, 5)
+                reward -= 0.08 * min(self.stuck_steps, 5)
 
             if min_monster_dist <= 2.0:
-                reward -= 0.1
+                reward -= 0.2
             elif min_monster_dist <= 5.0:
-                reward -= 0.03
+                reward -= 0.08
 
         self.has_last_state = True
         self.last_min_monster_dist = min_monster_dist
@@ -387,5 +447,6 @@ class Preprocessor:
             "flash_count": float(flash_count),
             "stuck_count": float(self.total_stuck_count),
             "total_score": float(env_info.get("total_score", 0.0)),
+            "danger_level": float(danger_level),
         }
         return [float(reward)], metrics
