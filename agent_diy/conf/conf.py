@@ -5,34 +5,50 @@
 ###########################################################################
 """
 Author: Tencent AI Arena Authors
+
+Configuration for the DIY PPO baseline.
+DIY PPO 基线配置。
 """
 
 
-import numpy as np
-
-
-# Configuration
-# 配置，包含维度设置，算法参数设置，文件的最后一些配置是开悟平台使用不要改动
 class Config:
 
-    # Whether to use CNN networks
-    # 是否使用CNN网络
-    USE_CNN = False
-    VIEW_SIZE = 50 if USE_CNN else 0
+    # Feature dimensions / 特征维度（共40维）
+    FEATURES = [
+        4,
+        5,
+        5,
+        16,
+        8,
+        2,
+    ]
+    FEATURE_SPLIT_SHAPE = FEATURES
+    FEATURE_LEN = sum(FEATURE_SPLIT_SHAPE)
+    DIM_OF_OBSERVATION = FEATURE_LEN
 
-    FEATURE_VECTOR_SHAPE = (153,)
+    # Compatibility aliases for the original DIY template.
+    # 保留模板字段，方便后续扩展或框架侧读取。
+    USE_CNN = False
+    VIEW_SIZE = 0
+    FEATURE_VECTOR_SHAPE = (DIM_OF_OBSERVATION,)
     FEATURE_IMAGE_SHAPE = (4, VIEW_SIZE + 1, VIEW_SIZE + 1)
 
-    ACTION_SHAPE = (8,)
-    VALUE_SHAPE = (1,)
+    # Action space / 动作空间：Phase 0 先保持8个移动方向
+    ACTION_NUM = 8
+    ACTION_SHAPE = (ACTION_NUM,)
 
-    # Discount factor GAMMA in RL
-    # RL中的回报折扣GAMMA
-    GAMMA = 0.95
+    # Value head / 价值头：单头生存奖励
+    VALUE_NUM = 1
+    VALUE_SHAPE = (VALUE_NUM,)
 
-    # Initial learning rate
-    # 初始的学习率
-    START_LR = 5e-4
-
-    VALUE_LOSS_COEFF = 0.5
-    ENTROPY_LOSS_COEFF = 0.025
+    # PPO hyperparameters / PPO 超参数
+    GAMMA = 0.99
+    LAMDA = 0.95
+    INIT_LEARNING_RATE_START = 0.0003
+    START_LR = INIT_LEARNING_RATE_START
+    BETA_START = 0.001
+    CLIP_PARAM = 0.2
+    VF_COEF = 1.0
+    VALUE_LOSS_COEFF = VF_COEF
+    ENTROPY_LOSS_COEFF = BETA_START
+    GRAD_CLIP_RANGE = 0.5
