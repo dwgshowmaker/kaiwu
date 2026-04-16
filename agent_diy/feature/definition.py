@@ -15,7 +15,18 @@ from common_python.utils.common_func import create_cls
 from agent_diy.conf.conf import Config
 
 
-ObsData = create_cls("ObsData", feature=None, legal_action=None, safe_action=None, danger_level=None)
+ObsData = create_cls(
+    "ObsData",
+    feature=None,
+    legal_action=None,
+    safe_action=None,
+    danger_level=None,
+    safe_action_score=None,
+    safe_path_len=None,
+    safe_action_margin=None,
+    safe_is_flash=None,
+    safe_trap_risk=None,
+)
 
 ActData = create_cls(
     "ActData",

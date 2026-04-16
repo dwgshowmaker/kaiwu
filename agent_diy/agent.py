@@ -119,6 +119,11 @@ class Agent(BaseAgent):
             legal_action=legal_action,
             safe_action=metrics.get("safe_action", -1),
             danger_level=metrics.get("danger_level", 0.0),
+            safe_action_score=metrics.get("safe_action_score", 0.0),
+            safe_path_len=metrics.get("safe_path_len", 0.0),
+            safe_action_margin=metrics.get("safe_action_margin", 0.0),
+            safe_is_flash=metrics.get("safe_is_flash", 0.0),
+            safe_trap_risk=metrics.get("safe_trap_risk", 0.0),
         )
         remain_info = {"reward": reward}
         remain_info.update(metrics)
@@ -168,20 +173,22 @@ class Agent(BaseAgent):
         return int(np.searchsorted(cdf, random_value, side="right"))
 
     def _select_greedy_action(self, probs, obs_data):
-        safe_action = int(getattr(obs_data, "safe_action", -1))
-        danger_level = float(getattr(obs_data, "danger_level", 0.0))
-        if danger_level >= 0.35 and 0 <= safe_action < len(probs):
-            return safe_action
+        safe_context = self._get_safe_action_context(obs_data, len(probs))
+        if safe_context is not None and self._calc_safe_prior_weight(safe_context) >= 0.28:
+            return safe_context["safe_action"]
         return self._legal_sample(probs, use_max=True)
 
     def _apply_safety_prior(self, probs, obs_data):
         """Blend model policy with a danger-only escape prior for early PPO stability."""
-        safe_action = int(getattr(obs_data, "safe_action", -1))
-        danger_level = float(getattr(obs_data, "danger_level", 0.0))
-        if danger_level < 0.25 or not (0 <= safe_action < len(probs)):
+        safe_context = self._get_safe_action_context(obs_data, len(probs))
+        if safe_context is None:
             return probs, False
 
-        prior_weight = min(0.6, 0.15 + 0.45 * danger_level)
+        prior_weight = self._calc_safe_prior_weight(safe_context)
+        if prior_weight <= 1e-6:
+            return probs, False
+
+        safe_action = safe_context["safe_action"]
         prior = np.zeros_like(probs, dtype=np.float32)
         prior[safe_action] = 1.0
         mixed = (1.0 - prior_weight) * np.array(probs, dtype=np.float32) + prior_weight * prior
@@ -189,6 +196,46 @@ class Agent(BaseAgent):
         if mixed.size == 0:
             return probs, False
         return mixed, True
+
+    def _get_safe_action_context(self, obs_data, prob_size):
+        safe_action = int(getattr(obs_data, "safe_action", -1))
+        if not (0 <= safe_action < prob_size):
+            return None
+
+        return {
+            "safe_action": safe_action,
+            "danger_level": float(getattr(obs_data, "danger_level", 0.0)),
+            "safe_action_score": float(getattr(obs_data, "safe_action_score", 0.0)),
+            "safe_path_len": float(getattr(obs_data, "safe_path_len", 0.0)),
+            "safe_action_margin": float(getattr(obs_data, "safe_action_margin", 0.0)),
+            "safe_is_flash": bool(getattr(obs_data, "safe_is_flash", 0.0)),
+            "safe_trap_risk": float(getattr(obs_data, "safe_trap_risk", 0.0)),
+        }
+
+    def _calc_safe_prior_weight(self, safe_context):
+        danger_level = safe_context["danger_level"]
+        if danger_level < 0.25:
+            return 0.0
+
+        if safe_context["safe_is_flash"]:
+            safe_margin = safe_context["safe_action_margin"]
+            safe_path_len = safe_context["safe_path_len"]
+            safe_trap_risk = safe_context["safe_trap_risk"]
+            if danger_level < 0.45 or safe_path_len < 2.0 or safe_trap_risk >= 0.7:
+                return 0.0
+            if safe_margin < 0.15 and danger_level < 0.8:
+                return 0.0
+
+            prior_weight = 0.10 + 0.24 * danger_level + 0.06 * np.clip(safe_margin, 0.0, 2.0)
+            prior_weight *= max(0.35, 1.0 - 0.65 * np.clip(safe_trap_risk, 0.0, 1.0))
+            if safe_path_len <= 2.0:
+                prior_weight *= 0.8
+            return min(0.42, float(prior_weight))
+
+        prior_weight = min(0.58, 0.14 + 0.44 * danger_level)
+        if safe_context["safe_action_margin"] > 0.75:
+            prior_weight = min(0.62, prior_weight + 0.04)
+        return float(prior_weight)
 
     def _normalize_probs(self, probs):
         """Clamp and normalize probabilities to a numerically safe distribution."""
