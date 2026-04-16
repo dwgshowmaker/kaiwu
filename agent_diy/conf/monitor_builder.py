@@ -244,6 +244,36 @@ def build_monitor():
             expr="avg(flash_escape_gain{})",
         )
         .end_panel()
+        .add_panel(
+            name="flash_trap_count",
+            name_en="flash_trap_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="flash_trap_count",
+            expr="avg(flash_trap_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="flash_hold_count",
+            name_en="flash_hold_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="flash_hold_count",
+            expr="avg(flash_hold_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="late_game_steps",
+            name_en="late_game_steps",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="late_game_steps",
+            expr="avg(late_game_steps{})",
+        )
+        .end_panel()
         .end_group()
         .build()
     )

@@ -150,7 +150,10 @@ class EpisodeRunner:
                         f"near_death:{_remain_info.get('near_death_count', 0)} "
                         f"good_flash:{_remain_info.get('good_flash_count', 0)} "
                         f"bad_flash:{_remain_info.get('bad_flash_count', 0)} "
+                        f"flash_trap:{_remain_info.get('flash_trap_count', 0)} "
+                        f"flash_hold:{_remain_info.get('flash_hold_count', 0)} "
                         f"flash_gain:{float(_remain_info.get('flash_escape_gain', 0.0)):.3f} "
+                        f"late_game:{_remain_info.get('late_game_steps', 0)} "
                         f"safe_prior:{safe_prior_count} "
                         f"safe_action:{safe_action_count}"
                     )
@@ -193,7 +196,10 @@ class EpisodeRunner:
                             "near_death_count": int(_remain_info.get("near_death_count", 0)),
                             "good_flash_count": int(_remain_info.get("good_flash_count", 0)),
                             "bad_flash_count": int(_remain_info.get("bad_flash_count", 0)),
+                            "flash_trap_count": int(_remain_info.get("flash_trap_count", 0)),
+                            "flash_hold_count": int(_remain_info.get("flash_hold_count", 0)),
                             "flash_escape_gain": round(float(_remain_info.get("flash_escape_gain", 0.0)), 4),
+                            "late_game_steps": int(_remain_info.get("late_game_steps", 0)),
                             "safe_prior_count": safe_prior_count,
                             "safe_action_count": safe_action_count,
                         }

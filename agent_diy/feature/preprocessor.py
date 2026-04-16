@@ -34,6 +34,14 @@ FLASH_DIAGONAL_DISTANCE = 8
 GOOD_FLASH_ESCAPE_GAIN = 6.0
 BAD_FLASH_ESCAPE_GAIN = 2.0
 MOVE_ACTION_NUM = 8
+FLASH_REVIEW_STEPS = 3
+LATE_GAME_STEP_THRESHOLD = 400
+SURVIVAL_MILESTONES = {
+    200: 0.15,
+    400: 0.25,
+    600: 0.4,
+    800: 0.6,
+}
 
 DIRECTION_TO_VECTOR = {
     0: (0.0, 0.0),
@@ -115,6 +123,13 @@ class Preprocessor:
         self.good_flash_count = 0
         self.bad_flash_count = 0
         self.flash_escape_gain_sum = 0.0
+        self.flash_trap_count = 0
+        self.flash_hold_count = 0
+        self.late_game_steps = 0
+        self.survival_milestones = set()
+        self.flash_review_steps = 0
+        self.flash_review_origin_dist = MAX_MAP_DISTANCE
+        self.flash_review_bad = False
 
     def feature_process(self, env_obs, last_action):
         """Process env_obs into feature vector, legal_action mask, reward and metrics."""
@@ -414,9 +429,12 @@ class Preprocessor:
         escape_norm = max(_distance(escape_dx, escape_dz), 1e-6)
         danger_level = 1.0 - _norm(min_monster_dist, DANGER_PRIOR_DISTANCE)
 
-        best_action = -1
-        best_score = -1e9
-        best_path_len = 0
+        best_move_action = -1
+        best_move_score = -1e9
+        best_move_path_len = 0
+        best_flash_action = -1
+        best_flash_score = -1e9
+        best_flash_path_len = 0
         for action, move in ACTION_TO_VECTOR.items():
             if action >= len(legal_action) or not legal_action[action]:
                 continue
@@ -434,12 +452,37 @@ class Preprocessor:
                 escape_norm=escape_norm,
                 danger_level=danger_level,
             )
-            if score > best_score:
-                best_score = score
-                best_action = action
-                best_path_len = path_len
+            if action < MOVE_ACTION_NUM:
+                if score > best_move_score:
+                    best_move_score = score
+                    best_move_action = action
+                    best_move_path_len = path_len
+            else:
+                if score > best_flash_score:
+                    best_flash_score = score
+                    best_flash_action = action
+                    best_flash_path_len = path_len
 
-        return best_action, danger_level, best_score, best_path_len
+        if best_move_action < 0:
+            return best_flash_action, danger_level, best_flash_score, best_flash_path_len
+
+        if best_flash_action >= 0 and self._should_use_flash_prior(
+            danger_level=danger_level,
+            best_move_score=best_move_score,
+            best_flash_score=best_flash_score,
+        ):
+            return best_flash_action, danger_level, best_flash_score, best_flash_path_len
+
+        return best_move_action, danger_level, best_move_score, best_move_path_len
+
+    def _should_use_flash_prior(self, danger_level, best_move_score, best_flash_score):
+        if best_flash_score <= -1e8:
+            return False
+        if danger_level >= 0.8 and best_flash_score >= best_move_score - 0.05:
+            return True
+        if danger_level >= 0.6 and best_flash_score >= best_move_score + 0.35:
+            return True
+        return best_flash_score >= best_move_score + 1.2
 
     def _score_escape_action(
         self,
@@ -537,6 +580,13 @@ class Preprocessor:
             self.danger_steps += 1
         if min_monster_dist <= 5.0:
             self.near_death_count += 1
+        if self.step_no >= LATE_GAME_STEP_THRESHOLD:
+            self.late_game_steps += 1
+
+        for milestone, bonus in SURVIVAL_MILESTONES.items():
+            if self.step_no >= milestone and milestone not in self.survival_milestones:
+                self.survival_milestones.add(milestone)
+                reward += bonus
 
         if self.has_last_state:
             dist_delta = min_monster_dist - self.last_min_monster_dist
@@ -549,6 +599,19 @@ class Preprocessor:
             buff_delta = max(0, buff_count - self.last_buff_count)
             reward += (0.7 if min_monster_dist <= 25.0 else 0.5) * buff_delta
 
+            if self.flash_review_steps > 0:
+                if self.blocked_this_step or min_monster_dist <= 5.0:
+                    self.flash_review_bad = True
+                self.flash_review_steps -= 1
+                if self.flash_review_steps == 0:
+                    sustained_flash_gain = min_monster_dist - self.flash_review_origin_dist
+                    if self.flash_review_bad and sustained_flash_gain < GOOD_FLASH_ESCAPE_GAIN:
+                        self.flash_trap_count += 1
+                        reward -= 0.22 if self.step_no >= LATE_GAME_STEP_THRESHOLD else 0.16
+                    elif not self.flash_review_bad and sustained_flash_gain >= GOOD_FLASH_ESCAPE_GAIN:
+                        self.flash_hold_count += 1
+                        reward += 0.12 if self.step_no >= LATE_GAME_STEP_THRESHOLD else 0.06
+
             flash_delta = max(0, flash_count - self.last_flash_count)
             if flash_delta > 0:
                 flash_escape_gain = dist_delta
@@ -560,12 +623,16 @@ class Preprocessor:
                     or got_flash_value
                 ):
                     self.good_flash_count += flash_delta
-                    reward += 0.45 * flash_delta + 0.05 * float(np.clip(flash_escape_gain, 0.0, 10.0))
+                    reward += 0.42 * flash_delta + 0.05 * float(np.clip(flash_escape_gain, 0.0, 10.0))
                     if got_flash_value:
                         reward += 0.2
                 elif flash_escape_gain <= BAD_FLASH_ESCAPE_GAIN and not got_flash_value:
                     self.bad_flash_count += flash_delta
-                    reward -= 0.18 * flash_delta
+                    reward -= (0.26 if self.step_no >= LATE_GAME_STEP_THRESHOLD else 0.22) * flash_delta
+
+                self.flash_review_steps = FLASH_REVIEW_STEPS
+                self.flash_review_origin_dist = self.last_min_monster_dist
+                self.flash_review_bad = False
 
             if self.last_hero_pos == hero_pos and 0 <= int(last_action) < Config.ACTION_NUM:
                 self.stuck_steps += 1
@@ -604,6 +671,9 @@ class Preprocessor:
             "good_flash_count": float(self.good_flash_count),
             "bad_flash_count": float(self.bad_flash_count),
             "flash_escape_gain": float(self.flash_escape_gain_sum),
+            "flash_trap_count": float(self.flash_trap_count),
+            "flash_hold_count": float(self.flash_hold_count),
+            "late_game_steps": float(self.late_game_steps),
             "total_score": float(env_info.get("total_score", 0.0)),
             "danger_level": float(danger_level),
         }
