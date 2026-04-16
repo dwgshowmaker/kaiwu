@@ -165,6 +165,16 @@ def build_monitor():
         )
         .end_panel()
         .add_panel(
+            name="loop_count",
+            name_en="loop_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="loop_count",
+            expr="avg(loop_count{})",
+        )
+        .end_panel()
+        .add_panel(
             name="blocked_count",
             name_en="blocked_count",
             type="line",

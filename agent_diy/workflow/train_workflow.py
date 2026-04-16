@@ -95,6 +95,10 @@ class EpisodeRunner:
             safe_action_margin_sum = 0.0
             safe_trap_risk_sum = 0.0
             state_eval_count = 0
+            state_potential_sum = 0.0
+            safety_potential_sum = 0.0
+            resource_potential_sum = 0.0
+            flash_potential_sum = 0.0
 
             self.logger.info(f"Episode {self.episode_cnt} start")
 
@@ -132,6 +136,10 @@ class EpisodeRunner:
 
                 reward = np.array(_remain_info.get("reward", [0.0]), dtype=np.float32)
                 total_reward += float(reward[0])
+                state_potential_sum += float(_remain_info.get("state_potential", 0.0) or 0.0)
+                safety_potential_sum += float(_remain_info.get("safety_potential", 0.0) or 0.0)
+                resource_potential_sum += float(_remain_info.get("resource_potential", 0.0) or 0.0)
+                flash_potential_sum += float(_remain_info.get("flash_potential", 0.0) or 0.0)
                 if "min_monster_dist" in _remain_info:
                     min_dist_sum += float(_remain_info["min_monster_dist"])
                     min_dist_count += 1
@@ -166,10 +174,15 @@ class EpisodeRunner:
                         f"flash_hold:{_remain_info.get('flash_hold_count', 0)} "
                         f"flash_gain:{float(_remain_info.get('flash_escape_gain', 0.0)):.3f} "
                         f"late_game:{_remain_info.get('late_game_steps', 0)} "
+                        f"loop:{_remain_info.get('loop_count', 0)} "
                         f"state_pot:{float(_remain_info.get('state_potential', 0.0)):.3f} "
                         f"safety_pot:{float(_remain_info.get('safety_potential', 0.0)):.3f} "
                         f"resource_pot:{float(_remain_info.get('resource_potential', 0.0)):.3f} "
                         f"flash_pot:{float(_remain_info.get('flash_potential', 0.0)):.3f} "
+                        f"state_pot_avg:{state_potential_sum / max(1, state_eval_count):.3f} "
+                        f"safety_pot_avg:{safety_potential_sum / max(1, state_eval_count):.3f} "
+                        f"resource_pot_avg:{resource_potential_sum / max(1, state_eval_count):.3f} "
+                        f"flash_pot_avg:{flash_potential_sum / max(1, state_eval_count):.3f} "
                         f"safe_prior:{safe_prior_count} "
                         f"safe_action:{safe_action_count} "
                         f"safe_flash_steps:{safe_flash_step_count} "
@@ -210,6 +223,7 @@ class EpisodeRunner:
                             "fail_rate": 1.0 if terminated else 0.0,
                             "avg_min_monster_dist": round(avg_min_monster_dist, 4),
                             "stuck_count": int(_remain_info.get("stuck_count", 0)),
+                            "loop_count": int(_remain_info.get("loop_count", 0)),
                             "blocked_count": int(_remain_info.get("blocked_count", 0)),
                             "danger_level": round(float(_remain_info.get("danger_level", 0.0)), 4),
                             "danger_steps": int(_remain_info.get("danger_steps", 0)),
@@ -220,10 +234,10 @@ class EpisodeRunner:
                             "flash_hold_count": int(_remain_info.get("flash_hold_count", 0)),
                             "flash_escape_gain": round(float(_remain_info.get("flash_escape_gain", 0.0)), 4),
                             "late_game_steps": int(_remain_info.get("late_game_steps", 0)),
-                            "state_potential": round(float(_remain_info.get("state_potential", 0.0)), 4),
-                            "safety_potential": round(float(_remain_info.get("safety_potential", 0.0)), 4),
-                            "resource_potential": round(float(_remain_info.get("resource_potential", 0.0)), 4),
-                            "flash_potential": round(float(_remain_info.get("flash_potential", 0.0)), 4),
+                            "state_potential": round(state_potential_sum / max(1, state_eval_count), 4),
+                            "safety_potential": round(safety_potential_sum / max(1, state_eval_count), 4),
+                            "resource_potential": round(resource_potential_sum / max(1, state_eval_count), 4),
+                            "flash_potential": round(flash_potential_sum / max(1, state_eval_count), 4),
                             "safe_prior_count": safe_prior_count,
                             "safe_action_count": safe_action_count,
                             "safe_flash_step_count": safe_flash_step_count,

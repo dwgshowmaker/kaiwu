@@ -941,5 +941,26 @@ git commit -m "improve diy feature and reward shaping"
 - 当前是不是资源势能太低，说明安全时不会主动拿宝箱 / buff
 - 当前是不是闪现势能判断失真，说明闪现相关 shaping 还要再调
 
+### 7.4 根据 `2026-04-16 21` 点日志的后续修正
+
+新一轮日志里，虽然平均分数相对上一轮有回升，但仍存在两个明确问题：
+
+- `blocked_count`、`stuck_count` 仍然偏高，说明策略仍会绕墙和回环
+- 势能日志如果只看终局最后一帧，`resource_potential` 很容易长期显示为 `0`，不利于判断整局 reward 是否有效
+
+因此继续在 Phase 1 / 2 范围内补两类修正：
+
+1. 反回环修正
+
+- `safe_action` 打分时，如果候选落点反复接近最近几步走过的位置，会加额外惩罚
+- reward 中也会对“近期重复经过同一区域”的行为给轻量惩罚
+- 新增 `loop_count` 统计，专门区分“不是撞墙，但在绕圈”的问题
+
+2. 势能诊断改为整局平均
+
+- `[GAMEOVER]` 日志除了保留终局时刻的 `state_pot/safety_pot/resource_pot/flash_pot`
+- 还新增 `state_pot_avg/safety_pot_avg/resource_pot_avg/flash_pot_avg`
+- monitor 上报也改为按整局平均势能记录，避免只看终局瞬间造成误判
+
 实际开发目录选择 `agent_diy`，`agent_ppo` 保持为参考基线。
 如果按这个顺序推进，开发风险最低，收益也最稳定。

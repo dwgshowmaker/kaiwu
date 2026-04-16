@@ -29,6 +29,8 @@ CLOSE_THREAT_DISTANCE = 8.0
 DANGER_PRIOR_DISTANCE = 18.0
 ESCAPE_LOOKAHEAD_STEPS = 3
 BLOCKED_ACTION_COOLDOWN = 4
+RECENT_POSITION_WINDOW = 8
+LOOP_DISTANCE = 2.5
 FLASH_ORTHOGONAL_DISTANCE = 10
 FLASH_DIAGONAL_DISTANCE = 8
 GOOD_FLASH_ESCAPE_GAIN = 6.0
@@ -124,6 +126,7 @@ class Preprocessor:
         self.last_flash_count = 0
         self.stuck_steps = 0
         self.total_stuck_count = 0
+        self.loop_count = 0
         self.blocked_action_cooldowns = [0] * Config.ACTION_NUM
         self.blocked_this_step = 0
         self.total_blocked_count = 0
@@ -144,6 +147,7 @@ class Preprocessor:
         self.flash_review_min_danger = 1.0
         self.flash_review_clear_steps = 0
         self.last_state_potential = 0.0
+        self.recent_positions = []
 
     def feature_process(self, env_obs, last_action):
         """Process env_obs into feature vector, legal_action mask, reward and metrics."""
@@ -221,6 +225,7 @@ class Preprocessor:
             safe_is_flash,
             safe_trap_risk,
         ) = self._select_safe_action(
+            hero_pos=(hero_x, hero_z),
             closest_monster_rel=closest_monster_rel,
             min_monster_dist=min_monster_dist,
             map_info=map_info,
@@ -470,7 +475,7 @@ class Preprocessor:
             self.total_blocked_count += 1
             self.blocked_action_cooldowns[action] = BLOCKED_ACTION_COOLDOWN
 
-    def _select_safe_action(self, closest_monster_rel, min_monster_dist, map_info, legal_action):
+    def _select_safe_action(self, hero_pos, closest_monster_rel, min_monster_dist, map_info, legal_action):
         if closest_monster_rel is None or min_monster_dist > DANGER_PRIOR_DISTANCE:
             return -1, 0.0, 0.0, 0.0, 0.0, False, 0.0
 
@@ -492,6 +497,7 @@ class Preprocessor:
 
             move_dx, move_dz = move
             score, path_len, trap_risk = self._score_escape_action(
+                hero_pos=hero_pos,
                 map_info=map_info,
                 action=action,
                 move_dx=move_dx,
@@ -565,6 +571,7 @@ class Preprocessor:
 
     def _score_escape_action(
         self,
+        hero_pos,
         map_info,
         action,
         move_dx,
@@ -588,6 +595,7 @@ class Preprocessor:
         open_neighbors = self._local_open_count(map_info, move_dx, move_dz)
         edge_margin = self._landing_edge_margin(map_info, move_dx, move_dz)
         is_passable = self._is_adjacent_passable(map_info, move_dx, move_dz)
+        revisit_penalty = self._landing_repeat_penalty(hero_pos, move_dx, move_dz, is_flash=is_flash)
 
         blocked_cooldown = self.blocked_action_cooldowns[action]
         passable_score = 1.0 if is_passable else -6.0
@@ -617,6 +625,7 @@ class Preprocessor:
             + edge_penalty
             + flash_bonus
             + flash_penalty
+            - revisit_penalty
             - (0.6 if is_flash else 0.55) * blocked_cooldown
         )
         trap_risk = 0.0
@@ -629,6 +638,28 @@ class Preprocessor:
                 trap_risk *= 0.85
             trap_risk = float(np.clip(trap_risk, 0.0, 1.0))
         return score, path_len, trap_risk
+
+    def _landing_repeat_penalty(self, hero_pos, move_dx, move_dz, is_flash=False):
+        if hero_pos is None or not self.recent_positions:
+            return 0.0
+
+        landing_pos = (float(hero_pos[0]) + float(move_dx), float(hero_pos[1]) + float(move_dz))
+        repeat_count = self._recent_visit_count(landing_pos)
+        if repeat_count <= 0:
+            return 0.0
+
+        base_penalty = 0.12 if is_flash else 0.22
+        return base_penalty * min(repeat_count, 3)
+
+    def _recent_visit_count(self, pos):
+        if pos is None or not self.recent_positions:
+            return 0
+
+        count = 0
+        for hx, hz in self.recent_positions:
+            if _distance(pos[0] - hx, pos[1] - hz) <= LOOP_DISTANCE:
+                count += 1
+        return count
 
     def _escape_corridor_len(self, map_info, dx, dz, is_flash=False):
         if map_info is None or len(map_info) == 0:
@@ -712,6 +743,7 @@ class Preprocessor:
         flash_count = int(env_info.get("flash_count", 0))
         flash_escape_gain = 0.0
         is_late_game = self.step_no >= LATE_GAME_STEP_THRESHOLD
+        recent_visit_count = self._recent_visit_count(hero_pos)
         state_potential, potential_parts = self._calc_state_potential(
             min_monster_dist=min_monster_dist,
             danger_level=danger_level,
@@ -722,6 +754,7 @@ class Preprocessor:
             nearest_treasure_dist=nearest_treasure_dist,
             nearest_buff_dist=nearest_buff_dist,
             is_late_game=is_late_game,
+            recent_visit_count=recent_visit_count,
         )
 
         reward = 0.02
@@ -741,6 +774,9 @@ class Preprocessor:
             dist_delta = min_monster_dist - self.last_min_monster_dist
             last_danger_level = self._danger_from_dist(self.last_min_monster_dist)
             reward += POTENTIAL_GAMMA * state_potential - self.last_state_potential
+            if recent_visit_count > 0:
+                self.loop_count += 1
+                reward -= 0.03 * min(recent_visit_count, 3)
 
             treasure_delta = max(0, treasure_count - self.last_treasure_count)
             reward += 1.2 * treasure_delta
@@ -860,6 +896,9 @@ class Preprocessor:
         self.last_buff_count = buff_count
         self.last_flash_count = flash_count
         self.last_state_potential = state_potential
+        self.recent_positions.append((float(hero_pos[0]), float(hero_pos[1])))
+        if len(self.recent_positions) > RECENT_POSITION_WINDOW:
+            self.recent_positions = self.recent_positions[-RECENT_POSITION_WINDOW:]
 
         metrics = {
             "min_monster_dist": float(min_monster_dist),
@@ -867,6 +906,7 @@ class Preprocessor:
             "buff_count": float(buff_count),
             "flash_count": float(flash_count),
             "stuck_count": float(self.total_stuck_count),
+            "loop_count": float(self.loop_count),
             "blocked_count": float(self.total_blocked_count),
             "blocked_this_step": float(self.blocked_this_step),
             "danger_steps": float(self.danger_steps),
@@ -897,15 +937,20 @@ class Preprocessor:
         nearest_treasure_dist,
         nearest_buff_dist,
         is_late_game,
+        recent_visit_count,
     ):
         safety_potential = 0.58 * (1.0 - danger_level)
         safety_potential += 0.12 * float(np.clip(safe_path_len / max(1.0, ESCAPE_LOOKAHEAD_STEPS + 1), 0.0, 1.0))
         safety_potential -= 0.12 * float(np.clip(safe_trap_risk, 0.0, 1.0))
+        safety_potential -= 0.04 * min(recent_visit_count, 2)
         if is_late_game and min_monster_dist >= LATE_GAME_SAFE_DISTANCE and danger_level <= 0.45:
             safety_potential += 0.08
         safety_potential = float(np.clip(safety_potential, 0.0, 0.85))
 
-        resource_gate = float(np.clip((0.65 - danger_level) / 0.65, 0.0, 1.0))
+        resource_gate = float(np.clip((0.85 - danger_level) / 0.85, 0.0, 1.0))
+        resource_gate *= 0.8 + 0.2 * float(
+            np.clip(safe_path_len / max(1.0, ESCAPE_LOOKAHEAD_STEPS), 0.0, 1.0)
+        )
         treasure_potential = 0.0
         if nearest_treasure_dist < MAX_MAP_DISTANCE:
             treasure_potential = 0.24 * resource_gate * (
