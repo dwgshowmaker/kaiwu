@@ -421,14 +421,33 @@ Phase 1 已采用 **105 维** 特征，仍保持轻量 MLP 可承受的规模，
 
 这样可以避免 Phase 2 启动时被旧模型直接卡死。
 
-### 6. 风险点
+### 6. Phase 2 数值稳定性修复
+
+Phase 2 初版引入 16 动作和安全先验后，训练启动阶段可能出现：
+
+- `predict() Exception sum(pvals[:-1].astype(np.float64)) > 1.0`
+- `workflow() Exception 'NoneType' object is not subscriptable`
+
+根因是：
+
+- 安全先验混合后的概率分布在浮点误差下可能不再满足采样接口的严格要求
+- `predict()` 抛异常后，框架侧可能返回空结果，进而在 `workflow` 中触发连锁下标异常
+
+本轮修复策略：
+
+- 在 `Agent.predict()` 中对模型输出概率和安全先验混合后的概率都做显式归一化
+- 采样逻辑改为累计概率采样，避免依赖 `np.random.multinomial` 的严格概率和检查
+- `workflow` 中对空的 `predict()` 返回值增加防御分支，避免直接把线程打崩
+- 保留日志信息，方便后续确认是否还有上层业务异常
+
+### 7. 风险点
 
 1. 动作空间变大后探索会更难前期训练曲线可能变差，这是正常现象。
 2. 闪现很容易被学成“乱交技能”所以必须同时有 `good_flash_reward` 和 `bad_flash_penalty`。
 3. 如果 Phase 1 特征不够好，Phase 2 效果会很有限
    因此不要跳过 Phase 1。
 
-### 7. Phase 2 验收标准
+### 8. Phase 2 验收标准
 
 - 危险局面下闪现使用率上升
 - 被近身怪物贴脸击杀的比例下降

@@ -94,7 +94,14 @@ class EpisodeRunner:
             self.logger.info(f"Episode {self.episode_cnt} start")
 
             while not done:
-                act_data = self.agent.predict(list_obs_data=[obs_data])[0]
+                act_data_list = self.agent.predict(list_obs_data=[obs_data])
+                if not act_data_list:
+                    self.logger.error(
+                        f"predict returned empty result at episode {self.episode_cnt}, restart episode"
+                    )
+                    break
+
+                act_data = act_data_list[0]
                 safe_prior_count += int(getattr(act_data, "safe_prior_used", 0) or 0)
                 safe_action_count += int(getattr(act_data, "safe_action_used", 0) or 0)
                 act = self.agent.action_process(act_data)

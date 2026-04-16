@@ -57,7 +57,9 @@ class Agent(BaseAgent):
         legal_action = list_obs_data[0].legal_action
 
         logits, value, prob = self._run_model(feature, legal_action)
+        prob = self._normalize_probs(prob)
         prob, safe_prior_used = self._apply_safety_prior(prob, list_obs_data[0])
+        prob = self._normalize_probs(prob)
 
         action = self._legal_sample(prob, use_max=False)
         d_action = self._select_greedy_action(prob, list_obs_data[0])
@@ -141,6 +143,7 @@ class Agent(BaseAgent):
 
         legal_action_np = np.array(legal_action, dtype=np.float32)
         prob = self._legal_soft_max(logits_np, legal_action_np)
+        prob = self._normalize_probs(prob)
 
         return logits_np, value_np, prob
 
@@ -155,9 +158,14 @@ class Agent(BaseAgent):
 
     def _legal_sample(self, probs, use_max=False):
         """Sample action from probability distribution."""
+        probs = self._normalize_probs(probs)
         if use_max:
             return int(np.argmax(probs))
-        return int(np.argmax(np.random.multinomial(1, probs, size=1)))
+
+        random_value = float(np.random.random())
+        cdf = np.cumsum(probs, dtype=np.float64)
+        cdf[-1] = 1.0
+        return int(np.searchsorted(cdf, random_value, side="right"))
 
     def _select_greedy_action(self, probs, obs_data):
         safe_action = int(getattr(obs_data, "safe_action", -1))
@@ -177,7 +185,34 @@ class Agent(BaseAgent):
         prior = np.zeros_like(probs, dtype=np.float32)
         prior[safe_action] = 1.0
         mixed = (1.0 - prior_weight) * np.array(probs, dtype=np.float32) + prior_weight * prior
-        mixed_sum = np.sum(mixed)
-        if mixed_sum <= 1e-8:
+        mixed = self._normalize_probs(mixed)
+        if mixed.size == 0:
             return probs, False
-        return mixed / mixed_sum, True
+        return mixed, True
+
+    def _normalize_probs(self, probs):
+        """Clamp and normalize probabilities to a numerically safe distribution."""
+        probs = np.asarray(probs, dtype=np.float64).reshape(-1)
+        if probs.size == 0:
+            return probs
+
+        probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+        probs = np.clip(probs, 0.0, None)
+
+        total = float(np.sum(probs, dtype=np.float64))
+        if total <= 1e-12:
+            probs.fill(1.0 / probs.size)
+            return probs
+
+        probs /= total
+        pivot = int(np.argmax(probs))
+        others_sum = float(np.sum(np.delete(probs, pivot), dtype=np.float64))
+        probs[pivot] = max(0.0, 1.0 - others_sum)
+
+        total = float(np.sum(probs, dtype=np.float64))
+        if total <= 1e-12:
+            probs.fill(1.0 / probs.size)
+        else:
+            probs /= total
+
+        return probs
