@@ -40,6 +40,11 @@ FLASH_LOW_DANGER_THRESHOLD = 0.45
 FLASH_CLEAR_DANGER_THRESHOLD = 0.4
 FLASH_TRAP_DANGER_THRESHOLD = 0.7
 LATE_GAME_SAFE_DISTANCE = 10.0
+POTENTIAL_GAMMA = 0.99
+RESOURCE_POTENTIAL_DISTANCE = 45.0
+BUFF_POTENTIAL_DISTANCE = 36.0
+FLASH_HOLD_POTENTIAL_GAIN = 0.08
+FLASH_TRAP_POTENTIAL_GAIN = 0.02
 SURVIVAL_MILESTONES = {
     200: 0.15,
     400: 0.25,
@@ -133,9 +138,12 @@ class Preprocessor:
         self.survival_milestones = set()
         self.flash_review_steps = 0
         self.flash_review_origin_dist = MAX_MAP_DISTANCE
+        self.flash_review_origin_potential = 0.0
+        self.flash_review_peak_potential = 0.0
         self.flash_review_bad = False
         self.flash_review_min_danger = 1.0
         self.flash_review_clear_steps = 0
+        self.last_state_potential = 0.0
 
     def feature_process(self, env_obs, last_action):
         """Process env_obs into feature vector, legal_action mask, reward and metrics."""
@@ -160,6 +168,8 @@ class Preprocessor:
             monsters, hero_x, hero_z
         )
         hero_feat = self._build_hero_features(hero, hero_x, hero_z)
+        flash_ready = bool(hero_feat[3] > 0.5)
+        has_buff = bool(hero_feat[5] > 0.5)
         treasure_feat = self._build_organ_features(
             organs=organs,
             hero_x=hero_x,
@@ -175,9 +185,11 @@ class Preprocessor:
             sub_type=2,
             closest_monster_rel=closest_monster_rel,
             is_buff=True,
-            has_buff=hero_feat[5] > 0.0,
+            has_buff=has_buff,
             min_monster_dist=min_monster_dist,
         )
+        nearest_treasure_dist = self._closest_active_organ_dist(organs, hero_x, hero_z, sub_type=1)
+        nearest_buff_dist = self._closest_active_organ_dist(organs, hero_x, hero_z, sub_type=2)
         map_feat = self._build_local_map_features(map_info)
         legal_action = self._build_legal_action(legal_act_raw)
         progress_feat = self._build_progress_features(env_info)
@@ -222,6 +234,12 @@ class Preprocessor:
             min_monster_dist=min_monster_dist,
             last_action=last_action,
             danger_level=danger_level,
+            safe_path_len=safe_path_len,
+            safe_trap_risk=safe_trap_risk,
+            flash_ready=flash_ready,
+            has_buff=has_buff,
+            nearest_treasure_dist=nearest_treasure_dist,
+            nearest_buff_dist=nearest_buff_dist,
         )
         metrics["safe_action"] = float(safe_action)
         metrics["danger_level"] = float(danger_level)
@@ -348,6 +366,21 @@ class Preprocessor:
             )
 
         return np.array(features, dtype=np.float32)
+
+    def _closest_active_organ_dist(self, organs, hero_x, hero_z, sub_type):
+        min_dist = MAX_MAP_DISTANCE
+        for organ in organs:
+            if int(organ.get("sub_type", -1)) != sub_type:
+                continue
+            if int(organ.get("status", 1)) != 1:
+                continue
+            pos = _safe_pos(organ.get("pos"))
+            if pos is None:
+                continue
+            dx = pos[0] - hero_x
+            dz = pos[1] - hero_z
+            min_dist = min(min_dist, _distance(dx, dz))
+        return min_dist
 
     def _same_escape_quadrant(self, dx, dz, closest_monster_rel):
         if closest_monster_rel is None:
@@ -659,12 +692,37 @@ class Preprocessor:
             return False
         return bool(map_info[row][col] != 0)
 
-    def _calc_reward_and_metrics(self, env_info, hero, hero_pos, min_monster_dist, last_action, danger_level):
+    def _calc_reward_and_metrics(
+        self,
+        env_info,
+        hero,
+        hero_pos,
+        min_monster_dist,
+        last_action,
+        danger_level,
+        safe_path_len,
+        safe_trap_risk,
+        flash_ready,
+        has_buff,
+        nearest_treasure_dist,
+        nearest_buff_dist,
+    ):
         treasure_count = int(hero.get("treasure_collected_count", env_info.get("treasures_collected", 0)))
         buff_count = int(env_info.get("collected_buff", 0))
         flash_count = int(env_info.get("flash_count", 0))
         flash_escape_gain = 0.0
         is_late_game = self.step_no >= LATE_GAME_STEP_THRESHOLD
+        state_potential, potential_parts = self._calc_state_potential(
+            min_monster_dist=min_monster_dist,
+            danger_level=danger_level,
+            safe_path_len=safe_path_len,
+            safe_trap_risk=safe_trap_risk,
+            flash_ready=flash_ready,
+            has_buff=has_buff,
+            nearest_treasure_dist=nearest_treasure_dist,
+            nearest_buff_dist=nearest_buff_dist,
+            is_late_game=is_late_game,
+        )
 
         reward = 0.02
         if danger_level >= 0.25:
@@ -682,13 +740,7 @@ class Preprocessor:
         if self.has_last_state:
             dist_delta = min_monster_dist - self.last_min_monster_dist
             last_danger_level = self._danger_from_dist(self.last_min_monster_dist)
-            dist_weight = 0.08 if danger_level > 0.0 else 0.02
-            reward += dist_weight * float(np.clip(dist_delta, -3.0, 3.0))
-            if is_late_game:
-                if danger_level <= FLASH_CLEAR_DANGER_THRESHOLD and min_monster_dist >= LATE_GAME_SAFE_DISTANCE:
-                    reward += 0.03
-                elif danger_level >= 0.78:
-                    reward -= 0.025
+            reward += POTENTIAL_GAMMA * state_potential - self.last_state_potential
 
             treasure_delta = max(0, treasure_count - self.last_treasure_count)
             reward += 1.2 * treasure_delta
@@ -700,6 +752,7 @@ class Preprocessor:
 
             if self.flash_review_steps > 0:
                 self.flash_review_min_danger = min(self.flash_review_min_danger, danger_level)
+                self.flash_review_peak_potential = max(self.flash_review_peak_potential, state_potential)
                 if (
                     not self.blocked_this_step
                     and danger_level <= FLASH_CLEAR_DANGER_THRESHOLD
@@ -711,17 +764,24 @@ class Preprocessor:
                 self.flash_review_steps -= 1
                 if self.flash_review_steps == 0:
                     sustained_flash_gain = min_monster_dist - self.flash_review_origin_dist
+                    flash_potential_gain = self.flash_review_peak_potential - self.flash_review_origin_potential
                     trap_condition = (
                         self.flash_review_bad
-                        or sustained_flash_gain < BAD_FLASH_ESCAPE_GAIN
+                        or (
+                            sustained_flash_gain < BAD_FLASH_ESCAPE_GAIN
+                            and flash_potential_gain < FLASH_TRAP_POTENTIAL_GAIN
+                        )
                         or (
                             self.flash_review_min_danger > FLASH_TRAP_DANGER_THRESHOLD
-                            and sustained_flash_gain < (GOOD_FLASH_ESCAPE_GAIN - 1.5)
+                            and flash_potential_gain < FLASH_HOLD_POTENTIAL_GAIN
                         )
                     )
                     hold_condition = (
                         not trap_condition
-                        and sustained_flash_gain >= (GOOD_FLASH_ESCAPE_GAIN - 1.0)
+                        and (
+                            flash_potential_gain >= FLASH_HOLD_POTENTIAL_GAIN
+                            or sustained_flash_gain >= (GOOD_FLASH_ESCAPE_GAIN - 1.0)
+                        )
                         and (
                             self.flash_review_min_danger <= FLASH_CLEAR_DANGER_THRESHOLD
                             or self.flash_review_clear_steps >= 1
@@ -739,10 +799,12 @@ class Preprocessor:
                 flash_escape_gain = dist_delta
                 self.flash_escape_gain_sum += flash_escape_gain
                 got_flash_value = treasure_delta > 0 or buff_delta > 0
+                flash_potential_delta = state_potential - self.last_state_potential
                 low_danger_flash = last_danger_level < 0.12 and not got_flash_value
                 if (
                     flash_escape_gain >= GOOD_FLASH_ESCAPE_GAIN
                     or (self.last_min_monster_dist <= CLOSE_THREAT_DISTANCE and flash_escape_gain >= 4.0)
+                    or flash_potential_delta >= FLASH_HOLD_POTENTIAL_GAIN
                     or got_flash_value
                 ):
                     self.good_flash_count += flash_delta
@@ -751,7 +813,11 @@ class Preprocessor:
                         reward += 0.1 * flash_delta
                     if got_flash_value:
                         reward += 0.2
-                elif flash_escape_gain <= BAD_FLASH_ESCAPE_GAIN and not got_flash_value:
+                elif (
+                    flash_escape_gain <= BAD_FLASH_ESCAPE_GAIN
+                    and flash_potential_delta < FLASH_TRAP_POTENTIAL_GAIN
+                    and not got_flash_value
+                ):
                     self.bad_flash_count += flash_delta
                     reward -= (0.24 if is_late_game else 0.18) * flash_delta
                 elif low_danger_flash:
@@ -760,6 +826,8 @@ class Preprocessor:
 
                 self.flash_review_steps = FLASH_REVIEW_STEPS
                 self.flash_review_origin_dist = self.last_min_monster_dist
+                self.flash_review_origin_potential = self.last_state_potential
+                self.flash_review_peak_potential = state_potential
                 self.flash_review_bad = bool(self.blocked_this_step or min_monster_dist <= 5.0)
                 self.flash_review_min_danger = danger_level
                 self.flash_review_clear_steps = int(
@@ -791,6 +859,7 @@ class Preprocessor:
         self.last_treasure_count = treasure_count
         self.last_buff_count = buff_count
         self.last_flash_count = flash_count
+        self.last_state_potential = state_potential
 
         metrics = {
             "min_monster_dist": float(min_monster_dist),
@@ -810,8 +879,60 @@ class Preprocessor:
             "late_game_steps": float(self.late_game_steps),
             "total_score": float(env_info.get("total_score", 0.0)),
             "danger_level": float(danger_level),
+            "state_potential": float(state_potential),
+            "safety_potential": float(potential_parts["safety"]),
+            "resource_potential": float(potential_parts["resource"]),
+            "flash_potential": float(potential_parts["flash"]),
         }
         return [float(reward)], metrics
+
+    def _calc_state_potential(
+        self,
+        min_monster_dist,
+        danger_level,
+        safe_path_len,
+        safe_trap_risk,
+        flash_ready,
+        has_buff,
+        nearest_treasure_dist,
+        nearest_buff_dist,
+        is_late_game,
+    ):
+        safety_potential = 0.58 * (1.0 - danger_level)
+        safety_potential += 0.12 * float(np.clip(safe_path_len / max(1.0, ESCAPE_LOOKAHEAD_STEPS + 1), 0.0, 1.0))
+        safety_potential -= 0.12 * float(np.clip(safe_trap_risk, 0.0, 1.0))
+        if is_late_game and min_monster_dist >= LATE_GAME_SAFE_DISTANCE and danger_level <= 0.45:
+            safety_potential += 0.08
+        safety_potential = float(np.clip(safety_potential, 0.0, 0.85))
+
+        resource_gate = float(np.clip((0.65 - danger_level) / 0.65, 0.0, 1.0))
+        treasure_potential = 0.0
+        if nearest_treasure_dist < MAX_MAP_DISTANCE:
+            treasure_potential = 0.24 * resource_gate * (
+                1.0 - _norm(nearest_treasure_dist, RESOURCE_POTENTIAL_DISTANCE)
+            )
+        buff_potential = 0.0
+        if not has_buff and nearest_buff_dist < MAX_MAP_DISTANCE:
+            buff_potential = 0.16 * resource_gate * (
+                1.0 - _norm(nearest_buff_dist, BUFF_POTENTIAL_DISTANCE)
+            )
+        resource_potential = float(np.clip(treasure_potential + buff_potential, 0.0, 0.35))
+
+        flash_potential = 0.0
+        if flash_ready:
+            flash_potential = 0.08 + 0.16 * danger_level
+            if danger_level < 0.15:
+                flash_potential *= 0.35
+        flash_potential = float(np.clip(flash_potential, 0.0, 0.24))
+
+        total_potential = float(
+            np.clip(safety_potential + resource_potential + flash_potential, 0.0, 1.2)
+        )
+        return total_potential, {
+            "safety": safety_potential,
+            "resource": resource_potential,
+            "flash": flash_potential,
+        }
 
     def _danger_from_dist(self, min_monster_dist):
         if min_monster_dist > DANGER_PRIOR_DISTANCE:

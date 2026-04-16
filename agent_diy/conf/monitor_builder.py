@@ -314,6 +314,46 @@ def build_monitor():
             expr="avg(late_game_steps{})",
         )
         .end_panel()
+        .add_panel(
+            name="状态势能",
+            name_en="state_potential",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="state_potential",
+            expr="avg(state_potential{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="安全势能",
+            name_en="safety_potential",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="safety_potential",
+            expr="avg(safety_potential{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="资源势能",
+            name_en="resource_potential",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="resource_potential",
+            expr="avg(resource_potential{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="闪现势能",
+            name_en="flash_potential",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="flash_potential",
+            expr="avg(flash_potential{})",
+        )
+        .end_panel()
         .end_group()
         .build()
     )

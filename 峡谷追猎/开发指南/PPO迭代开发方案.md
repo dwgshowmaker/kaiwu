@@ -906,5 +906,40 @@ git commit -m "improve diy feature and reward shaping"
 5. 再做训练泛化
 6. 最后才考虑模型升级
 
+---
+
+## 十二、Phase 1/2 势能化 Shaping 补充
+
+继续只在 Phase 1 / Phase 2 范围内迭代时，不能一直靠新增固定系数奖励去“堆规则”，
+否则很容易出现 reward 项彼此打架、局部指标刚升整体分数又回落的问题。
+
+因此本轮开始把主 shaping 改成更原则化的“状态势能增量”：
+
+1. Phase 1：状态势能
+
+- 在 `Preprocessor` 中计算 `state_potential`
+- 状态势能拆成 `safety_potential`、`resource_potential`、`flash_potential`
+- 每步主 shaping 改为接近 `0.99 * Phi(s') - Phi(s)` 的势能差分
+
+2. Phase 2：闪现随访看势能
+
+- 闪现是否“真的救命”，不再只看单步距离变化
+- `flash_review` 同时看闪现后几步内的峰值势能提升
+- 如果距离和势能都没明显改善，才更倾向记为 `flash_trap_count`
+- 如果势能明显改善，即使还没完全脱离追击，也允许记为有效闪现
+
+3. 新增诊断项
+
+- `state_potential`
+- `safety_potential`
+- `resource_potential`
+- `flash_potential`
+
+这样下一轮看日志时，可以更快回答三个问题：
+
+- 当前是不是安全势能太低，说明还在乱跑
+- 当前是不是资源势能太低，说明安全时不会主动拿宝箱 / buff
+- 当前是不是闪现势能判断失真，说明闪现相关 shaping 还要再调
+
 实际开发目录选择 `agent_diy`，`agent_ppo` 保持为参考基线。
 如果按这个顺序推进，开发风险最低，收益也最稳定。

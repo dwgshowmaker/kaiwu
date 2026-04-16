@@ -166,6 +166,10 @@ class EpisodeRunner:
                         f"flash_hold:{_remain_info.get('flash_hold_count', 0)} "
                         f"flash_gain:{float(_remain_info.get('flash_escape_gain', 0.0)):.3f} "
                         f"late_game:{_remain_info.get('late_game_steps', 0)} "
+                        f"state_pot:{float(_remain_info.get('state_potential', 0.0)):.3f} "
+                        f"safety_pot:{float(_remain_info.get('safety_potential', 0.0)):.3f} "
+                        f"resource_pot:{float(_remain_info.get('resource_potential', 0.0)):.3f} "
+                        f"flash_pot:{float(_remain_info.get('flash_potential', 0.0)):.3f} "
                         f"safe_prior:{safe_prior_count} "
                         f"safe_action:{safe_action_count} "
                         f"safe_flash_steps:{safe_flash_step_count} "
@@ -216,6 +220,10 @@ class EpisodeRunner:
                             "flash_hold_count": int(_remain_info.get("flash_hold_count", 0)),
                             "flash_escape_gain": round(float(_remain_info.get("flash_escape_gain", 0.0)), 4),
                             "late_game_steps": int(_remain_info.get("late_game_steps", 0)),
+                            "state_potential": round(float(_remain_info.get("state_potential", 0.0)), 4),
+                            "safety_potential": round(float(_remain_info.get("safety_potential", 0.0)), 4),
+                            "resource_potential": round(float(_remain_info.get("resource_potential", 0.0)), 4),
+                            "flash_potential": round(float(_remain_info.get("flash_potential", 0.0)), 4),
                             "safe_prior_count": safe_prior_count,
                             "safe_action_count": safe_action_count,
                             "safe_flash_step_count": safe_flash_step_count,
