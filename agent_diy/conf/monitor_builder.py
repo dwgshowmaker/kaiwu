@@ -215,8 +215,8 @@ def build_monitor():
         )
         .end_panel()
         .add_panel(
-            name="safe_flash_step_count",
-            name_en="safe_flash_step_count",
+            name="安全闪现步数",
+            name_en="safe_flash_steps",
             type="line",
         )
         .add_metric(
@@ -225,8 +225,8 @@ def build_monitor():
         )
         .end_panel()
         .add_panel(
-            name="safe_flash_prior_count",
-            name_en="safe_flash_prior_count",
+            name="安全闪现先验",
+            name_en="safe_flash_prior",
             type="line",
         )
         .add_metric(
