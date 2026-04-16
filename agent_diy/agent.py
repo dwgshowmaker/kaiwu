@@ -58,12 +58,15 @@ class Agent(BaseAgent):
 
         logits, value, prob = self._run_model(feature, legal_action)
         prob = self._normalize_probs(prob)
+        prob, prep_prior_used = self._apply_prep_prior(prob, list_obs_data[0])
+        prob = self._normalize_probs(prob)
         prob, safe_prior_used = self._apply_safety_prior(prob, list_obs_data[0])
         prob = self._normalize_probs(prob)
 
         action = self._legal_sample(prob, use_max=False)
         d_action = self._select_greedy_action(prob, list_obs_data[0])
         safe_action = int(getattr(list_obs_data[0], "safe_action", -1))
+        prep_action = int(getattr(list_obs_data[0], "prep_action", -1))
 
         return [
             ActData(
@@ -71,6 +74,8 @@ class Agent(BaseAgent):
                 d_action=[d_action],
                 prob=list(prob),
                 value=value,
+                prep_prior_used=int(prep_prior_used),
+                prep_action_used=int(prep_prior_used and action == prep_action),
                 safe_prior_used=int(safe_prior_used),
                 safe_action_used=int(safe_prior_used and action == safe_action),
             )
@@ -124,6 +129,11 @@ class Agent(BaseAgent):
             safe_action_margin=metrics.get("safe_action_margin", 0.0),
             safe_is_flash=metrics.get("safe_is_flash", 0.0),
             safe_trap_risk=metrics.get("safe_trap_risk", 0.0),
+            prep_action=metrics.get("prep_action", -1),
+            prep_action_score=metrics.get("prep_action_score", 0.0),
+            prep_target_dist=metrics.get("prep_target_dist", 0.0),
+            flash_preserve_window_flag=metrics.get("flash_preserve_window_flag", 0.0),
+            buff_ready_window_flag=metrics.get("buff_ready_window_flag", 0.0),
             speedup_prep_flag=metrics.get("speedup_prep_flag", 0.0),
             post_speedup_flag=metrics.get("post_speedup_flag", 0.0),
             speed_ready_flag=metrics.get("speed_ready_flag", 0.0),
@@ -200,6 +210,25 @@ class Agent(BaseAgent):
             return probs, False
         return mixed, True
 
+    def _apply_prep_prior(self, probs, obs_data):
+        """Lightly bias safe pre-speedup states toward buff acquisition without overriding escape."""
+        prep_context = self._get_prep_action_context(obs_data, len(probs))
+        if prep_context is None:
+            return probs, False
+
+        prior_weight = self._calc_prep_prior_weight(prep_context)
+        if prior_weight <= 1e-6:
+            return probs, False
+
+        prep_action = prep_context["prep_action"]
+        prior = np.zeros_like(probs, dtype=np.float32)
+        prior[prep_action] = 1.0
+        mixed = (1.0 - prior_weight) * np.array(probs, dtype=np.float32) + prior_weight * prior
+        mixed = self._normalize_probs(mixed)
+        if mixed.size == 0:
+            return probs, False
+        return mixed, True
+
     def _get_safe_action_context(self, obs_data, prob_size):
         safe_action = int(getattr(obs_data, "safe_action", -1))
         if not (0 <= safe_action < prob_size):
@@ -217,6 +246,42 @@ class Agent(BaseAgent):
             "post_speedup": bool(getattr(obs_data, "post_speedup_flag", 0.0)),
             "speed_ready": bool(getattr(obs_data, "speed_ready_flag", 0.0)),
         }
+
+    def _get_prep_action_context(self, obs_data, prob_size):
+        prep_action = int(getattr(obs_data, "prep_action", -1))
+        if not (0 <= prep_action < prob_size):
+            return None
+
+        return {
+            "prep_action": prep_action,
+            "danger_level": float(getattr(obs_data, "danger_level", 0.0)),
+            "prep_action_score": float(getattr(obs_data, "prep_action_score", 0.0)),
+            "prep_target_dist": float(getattr(obs_data, "prep_target_dist", 0.0)),
+            "flash_preserve_window": bool(getattr(obs_data, "flash_preserve_window_flag", 0.0)),
+            "buff_ready_window": bool(getattr(obs_data, "buff_ready_window_flag", 0.0)),
+        }
+
+    def _calc_prep_prior_weight(self, prep_context):
+        danger_level = prep_context["danger_level"]
+        prep_score = prep_context["prep_action_score"]
+        target_dist = prep_context["prep_target_dist"]
+        if prep_score <= 0.0 or target_dist <= 0.0 or danger_level >= 0.58:
+            return 0.0
+
+        prior_weight = 0.06
+        if prep_context["flash_preserve_window"]:
+            prior_weight += 0.05
+        if prep_context["buff_ready_window"]:
+            prior_weight += 0.08
+        prior_weight += 0.06 * np.clip(prep_score / 2.5, 0.0, 1.0)
+        if target_dist <= 18.0:
+            prior_weight += 0.05
+        if target_dist <= 10.0:
+            prior_weight += 0.05
+        if danger_level >= 0.45:
+            prior_weight *= 0.6
+
+        return float(min(0.3 if prep_context["buff_ready_window"] else 0.22, prior_weight))
 
     def _calc_safe_prior_weight(self, safe_context):
         danger_level = safe_context["danger_level"]

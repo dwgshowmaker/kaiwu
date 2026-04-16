@@ -444,6 +444,26 @@ def build_monitor():
             expr="avg(flash_potential{})",
         )
         .end_panel()
+        .add_panel(
+            name="备战先验",
+            name_en="prep_prior_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="prep_prior_count",
+            expr="avg(prep_prior_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="备战命中",
+            name_en="prep_action_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="prep_action_count",
+            expr="avg(prep_action_count{})",
+        )
+        .end_panel()
         .end_group()
         .build()
     )

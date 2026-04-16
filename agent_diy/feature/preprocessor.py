@@ -35,7 +35,7 @@ DEFAULT_SPEEDUP_STEP = 500
 SPEEDUP_PREP_WINDOW = 100
 FLASH_PRESERVE_WINDOW = 100
 BUFF_READY_WINDOW = 50
-BUFF_PROGRESS_DANGER_LIMIT = 0.68
+BUFF_PROGRESS_DANGER_LIMIT = 0.78
 FLASH_ORTHOGONAL_DISTANCE = 10
 FLASH_DIAGONAL_DISTANCE = 8
 GOOD_FLASH_ESCAPE_GAIN = 6.0
@@ -264,6 +264,17 @@ class Preprocessor:
             has_buff=has_buff,
             speedup_context=speedup_context,
         )
+        prep_action, prep_action_score, prep_target_dist = self._select_prep_action(
+            organs=organs,
+            hero_pos=(hero_x, hero_z),
+            map_info=map_info,
+            legal_action=legal_action,
+            closest_monster_rel=closest_monster_rel,
+            min_monster_dist=min_monster_dist,
+            danger_level=danger_level,
+            has_buff=has_buff,
+            speedup_context=speedup_context,
+        )
 
         reward, metrics = self._calc_reward_and_metrics(
             env_info=env_info,
@@ -286,6 +297,11 @@ class Preprocessor:
         metrics["safe_action_margin"] = float(safe_action_margin)
         metrics["safe_is_flash"] = float(safe_is_flash)
         metrics["safe_trap_risk"] = float(safe_trap_risk)
+        metrics["prep_action"] = float(prep_action)
+        metrics["prep_action_score"] = float(prep_action_score)
+        metrics["prep_target_dist"] = float(prep_target_dist)
+        metrics["flash_preserve_window_flag"] = float(speedup_context["is_flash_preserve_window"])
+        metrics["buff_ready_window_flag"] = float(speedup_context["is_buff_ready_window"])
         metrics["speedup_prep_flag"] = float(speedup_context["is_speedup_prep"])
         metrics["post_speedup_flag"] = float(speedup_context["is_post_speedup"])
         metrics["speed_ready_flag"] = float(speedup_context["speed_ready"])
@@ -444,6 +460,25 @@ class Preprocessor:
             dz = pos[1] - hero_z
             min_dist = min(min_dist, _distance(dx, dz))
         return min_dist
+
+    def _nearest_active_organ(self, organs, hero_x, hero_z, sub_type):
+        nearest = None
+        min_dist = MAX_MAP_DISTANCE
+        for organ in organs:
+            if int(organ.get("sub_type", -1)) != sub_type:
+                continue
+            if int(organ.get("status", 1)) != 1:
+                continue
+            pos = _safe_pos(organ.get("pos"))
+            if pos is None:
+                continue
+            dx = pos[0] - hero_x
+            dz = pos[1] - hero_z
+            raw_dist = _distance(dx, dz)
+            if raw_dist < min_dist:
+                min_dist = raw_dist
+                nearest = (dx, dz, raw_dist)
+        return nearest
 
     def _same_escape_quadrant(self, dx, dz, closest_monster_rel):
         if closest_monster_rel is None:
@@ -645,6 +680,7 @@ class Preprocessor:
             is_speedup_prep=speedup_context["is_speedup_prep"],
             is_post_speedup=speedup_context["is_post_speedup"],
             is_flash_preserve_window=speedup_context["is_flash_preserve_window"],
+            is_buff_ready_window=speedup_context["is_buff_ready_window"],
             has_buff=has_buff,
             prep_urgency=speedup_context["prep_urgency"],
         ):
@@ -661,6 +697,58 @@ class Preprocessor:
         move_margin = best_move_score - best_flash_score if best_flash_action >= 0 else best_move_score
         return best_move_action, danger_level, best_move_score, best_move_path_len, move_margin, False, 0.0
 
+    def _select_prep_action(
+        self,
+        organs,
+        hero_pos,
+        map_info,
+        legal_action,
+        closest_monster_rel,
+        min_monster_dist,
+        danger_level,
+        has_buff,
+        speedup_context,
+    ):
+        if has_buff or not speedup_context["is_flash_preserve_window"]:
+            return -1, 0.0, 0.0
+        if danger_level >= 0.58:
+            return -1, 0.0, 0.0
+
+        nearest_buff = self._nearest_active_organ(organs, hero_pos[0], hero_pos[1], sub_type=2)
+        if nearest_buff is None:
+            return -1, 0.0, 0.0
+
+        buff_dx, buff_dz, buff_dist = nearest_buff
+        best_action = -1
+        best_score = -1e9
+        for action in range(MOVE_ACTION_NUM):
+            if action >= len(legal_action) or not legal_action[action]:
+                continue
+
+            move_dx, move_dz = ACTION_TO_VECTOR[action]
+            score = self._score_prep_action(
+                hero_pos=hero_pos,
+                map_info=map_info,
+                action=action,
+                move_dx=move_dx,
+                move_dz=move_dz,
+                buff_dx=buff_dx,
+                buff_dz=buff_dz,
+                buff_dist=buff_dist,
+                closest_monster_rel=closest_monster_rel,
+                min_monster_dist=min_monster_dist,
+                danger_level=danger_level,
+                is_buff_ready_window=speedup_context["is_buff_ready_window"],
+                prep_urgency=speedup_context["prep_urgency"],
+            )
+            if score > best_score:
+                best_score = score
+                best_action = action
+
+        if best_action < 0 or best_score <= 0.08:
+            return -1, 0.0, buff_dist
+        return best_action, best_score, buff_dist
+
     def _should_use_flash_prior(
         self,
         danger_level,
@@ -671,6 +759,7 @@ class Preprocessor:
         is_speedup_prep,
         is_post_speedup,
         is_flash_preserve_window,
+        is_buff_ready_window,
         has_buff,
         prep_urgency,
     ):
@@ -685,6 +774,11 @@ class Preprocessor:
                 return False
             preserve_margin = 0.08 + 0.18 * prep_urgency
             if best_flash_score < best_move_score + preserve_margin:
+                return False
+        if is_speedup_prep and is_buff_ready_window and not has_buff and danger_level < 0.92:
+            if best_flash_trap_risk > 0.35:
+                return False
+            if best_flash_score < best_move_score + (0.16 + 0.2 * prep_urgency):
                 return False
         if is_post_speedup and not has_buff:
             if danger_level >= 0.9:
@@ -759,12 +853,12 @@ class Preprocessor:
             if is_flash and danger_level < 0.55:
                 flash_penalty -= 0.08 * (0.6 + prep_urgency)
             if is_flash_preserve_window and is_flash and danger_level < 0.7:
-                flash_penalty -= 0.16 * (0.8 + prep_urgency)
+                flash_penalty -= 0.24 * (0.8 + prep_urgency)
             if is_buff_ready_window:
                 path_weight += 0.02
                 open_weight += 0.02
                 if is_flash and danger_level < 0.82:
-                    flash_penalty -= 0.12 * (1.0 + prep_urgency)
+                    flash_penalty -= 0.22 * (1.0 + prep_urgency)
         if is_post_speedup and not has_buff:
             path_weight += 0.12 if is_flash else 0.1
             open_weight += 0.08 if is_flash else 0.05
@@ -804,6 +898,68 @@ class Preprocessor:
                 trap_risk *= 0.82
             trap_risk = float(np.clip(trap_risk, 0.0, 1.0))
         return score, path_len, trap_risk
+
+    def _score_prep_action(
+        self,
+        hero_pos,
+        map_info,
+        action,
+        move_dx,
+        move_dz,
+        buff_dx,
+        buff_dz,
+        buff_dist,
+        closest_monster_rel,
+        min_monster_dist,
+        danger_level,
+        is_buff_ready_window,
+        prep_urgency,
+    ):
+        if not self._is_adjacent_passable(map_info, move_dx, move_dz):
+            return -6.0
+
+        next_buff_dist = _distance(buff_dx - move_dx, buff_dz - move_dz)
+        progress_gain = buff_dist - next_buff_dist
+        move_norm = max(_distance(move_dx, move_dz), 1e-6)
+        buff_alignment = (move_dx * buff_dx + move_dz * buff_dz) / max(move_norm * max(buff_dist, 1e-6), 1e-6)
+        path_len = self._escape_corridor_len(map_info, move_dx, move_dz, is_flash=False)
+        open_neighbors = self._local_open_count(map_info, move_dx, move_dz)
+        edge_margin = self._landing_edge_margin(map_info, move_dx, move_dz)
+        revisit_penalty = self._landing_repeat_penalty(hero_pos, move_dx, move_dz, is_flash=False)
+        blocked_cooldown = self.blocked_action_cooldowns[action]
+
+        monster_gain = 0.0
+        if closest_monster_rel is not None:
+            after_dx = closest_monster_rel[0] - move_dx
+            after_dz = closest_monster_rel[1] - move_dz
+            monster_gain = _distance(after_dx, after_dz) - min_monster_dist
+
+        edge_penalty = 0.0
+        if edge_margin < 2:
+            edge_penalty -= 0.1 * (2 - edge_margin) * (0.5 + prep_urgency)
+        dead_end_penalty = -0.3 * danger_level if path_len < 2 else 0.0
+        if open_neighbors < 3:
+            dead_end_penalty -= 0.08 * (3 - open_neighbors) * (0.5 + danger_level)
+        if danger_level >= 0.45 and monster_gain < -0.3:
+            dead_end_penalty -= 0.18
+
+        progress_weight = 1.9 if is_buff_ready_window else 1.35
+        score = (
+            progress_weight * progress_gain
+            + 0.65 * buff_alignment
+            + 0.16 * path_len
+            + 0.05 * open_neighbors
+            + 0.28 * monster_gain
+            + edge_penalty
+            + dead_end_penalty
+            - revisit_penalty
+            - 0.35 * blocked_cooldown
+        )
+        if next_buff_dist <= 12.0:
+            score += 0.18 if is_buff_ready_window else 0.1
+        if progress_gain <= -0.2:
+            score -= 0.18
+        return score
 
     def _landing_repeat_penalty(self, hero_pos, move_dx, move_dz, is_flash=False):
         if hero_pos is None or not self.recent_positions:
@@ -960,13 +1116,13 @@ class Preprocessor:
                 self.buff_ready_at_speedup = int(has_buff)
                 self.flash_ready_at_speedup = int(flash_ready)
                 if has_buff and flash_ready:
-                    reward += 0.42
+                    reward += 0.5
                 elif has_buff:
-                    reward += 0.34
+                    reward += 0.42
                 elif flash_ready:
-                    reward += 0.16
+                    reward += 0.08
                 else:
-                    reward -= 0.2
+                    reward -= 0.26
 
         for milestone, bonus in SURVIVAL_MILESTONES.items():
             if self.step_no >= milestone and milestone not in self.survival_milestones:
@@ -997,25 +1153,27 @@ class Preprocessor:
                     np.clip((BUFF_PROGRESS_DANGER_LIMIT - last_danger_level) / BUFF_PROGRESS_DANGER_LIMIT, 0.0, 1.0)
                 )
                 if is_buff_ready_window:
-                    buff_progress_scale = 0.05 + 0.03 * prep_urgency
+                    buff_progress_scale = 0.08 + 0.04 * prep_urgency
                 elif is_flash_preserve_window:
-                    buff_progress_scale = 0.03 + 0.02 * prep_urgency
+                    buff_progress_scale = 0.05 + 0.03 * prep_urgency
                 else:
-                    buff_progress_scale = 0.02 + 0.015 * prep_urgency
+                    buff_progress_scale = 0.03 + 0.02 * prep_urgency
                 reward += (
                     buff_progress_gate
                     * buff_progress_scale
                     * float(np.clip(buff_dist_delta / 3.0, -1.0, 1.0))
                 )
                 if nearest_buff_dist <= 12.0:
-                    reward += 0.01 * buff_progress_gate * (1.0 if is_buff_ready_window else 0.5)
-                if is_buff_ready_window and nearest_buff_dist > 24.0 and buff_progress_gate > 0.0:
-                    reward -= 0.008 * buff_progress_gate * min((nearest_buff_dist - 24.0) / 12.0, 1.0)
+                    reward += 0.02 * buff_progress_gate * (1.0 if is_buff_ready_window else 0.6)
+                if is_buff_ready_window and nearest_buff_dist > 20.0 and buff_progress_gate > 0.0:
+                    reward -= 0.015 * buff_progress_gate * min((nearest_buff_dist - 20.0) / 14.0, 1.0)
+                elif is_flash_preserve_window and nearest_buff_dist > 28.0 and buff_progress_gate > 0.0:
+                    reward -= 0.006 * buff_progress_gate * min((nearest_buff_dist - 28.0) / 16.0, 1.0)
 
             treasure_delta = max(0, treasure_count - self.last_treasure_count)
             treasure_reward = 1.2
             if is_speedup_prep and not has_buff:
-                treasure_reward = 0.85 if is_buff_ready_window else 1.0
+                treasure_reward = 0.65 if is_buff_ready_window else 0.95
             if is_post_speedup and not has_buff:
                 treasure_reward = 0.85
             reward += treasure_reward * treasure_delta
@@ -1025,9 +1183,9 @@ class Preprocessor:
             buff_delta = max(0, buff_count - self.last_buff_count)
             buff_reward = 0.7 if min_monster_dist <= 25.0 else 0.5
             if is_buff_ready_window:
-                buff_reward += 0.32 + 0.12 * prep_urgency
+                buff_reward += 0.45 + 0.16 * prep_urgency
             elif is_speedup_prep:
-                buff_reward += 0.22 + 0.08 * prep_urgency
+                buff_reward += 0.28 + 0.1 * prep_urgency
             if is_post_speedup:
                 buff_reward += 0.35
             reward += buff_reward * buff_delta
@@ -1112,7 +1270,7 @@ class Preprocessor:
                     self.bad_flash_count += flash_delta
                     penalty = 0.12 * flash_delta
                     if preserve_window_flash:
-                        penalty += (0.14 + 0.06 * prep_urgency) * flash_delta
+                        penalty += (0.2 + 0.08 * prep_urgency) * flash_delta
                     elif is_speedup_prep:
                         penalty += 0.08 * flash_delta
                     elif is_post_speedup:
@@ -1147,6 +1305,8 @@ class Preprocessor:
                 reward -= 0.008 + 0.015 * danger_level
                 if not speed_ready:
                     reward -= 0.012 * (0.4 + danger_level)
+            elif is_buff_ready_window and not has_buff and nearest_buff_dist < MAX_MAP_DISTANCE:
+                reward -= 0.004 * float(np.clip(nearest_buff_dist / BUFF_POTENTIAL_DISTANCE, 0.0, 1.0))
 
             if min_monster_dist <= 2.0:
                 reward -= 0.2
@@ -1253,23 +1413,23 @@ class Preprocessor:
         )
         buff_gate = resource_gate
         if is_speedup_prep and not has_buff:
-            buff_gate = max(buff_gate, 0.18 + 0.14 * prep_urgency)
+            buff_gate = max(buff_gate, 0.22 + 0.18 * prep_urgency)
             if is_flash_preserve_window:
-                buff_gate = max(buff_gate, 0.32)
+                buff_gate = max(buff_gate, 0.4)
             if is_buff_ready_window:
-                buff_gate = max(buff_gate, 0.44)
+                buff_gate = max(buff_gate, 0.6)
         treasure_scale = 1.0
         buff_scale = 1.0
         if is_speedup_prep:
             if is_buff_ready_window:
-                treasure_scale = 0.4 if not has_buff else 0.82
-                buff_scale = 2.15 if not has_buff else 0.45
+                treasure_scale = 0.2 if not has_buff else 0.75
+                buff_scale = 2.6 if not has_buff else 0.45
             elif is_flash_preserve_window:
-                treasure_scale = 0.56 if not has_buff else 0.9
-                buff_scale = 1.8 if not has_buff else 0.45
+                treasure_scale = 0.38 if not has_buff else 0.88
+                buff_scale = 2.1 if not has_buff else 0.45
             else:
-                treasure_scale = 0.72 if not has_buff else 0.92
-                buff_scale = 1.55 if not has_buff else 0.45
+                treasure_scale = 0.64 if not has_buff else 0.92
+                buff_scale = 1.7 if not has_buff else 0.45
         if is_post_speedup:
             treasure_scale = 0.35 if not has_buff else 0.65
             buff_scale = 1.75 if not has_buff else 0.25

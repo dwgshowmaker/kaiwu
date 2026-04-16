@@ -90,6 +90,8 @@ class EpisodeRunner:
             min_dist_count = 0
             safe_prior_count = 0
             safe_action_count = 0
+            prep_prior_count = 0
+            prep_action_count = 0
             safe_flash_prior_count = 0
             safe_flash_step_count = 0
             safe_action_margin_sum = 0.0
@@ -117,6 +119,8 @@ class EpisodeRunner:
                     break
 
                 act_data = act_data_list[0]
+                prep_prior_count += int(getattr(act_data, "prep_prior_used", 0) or 0)
+                prep_action_count += int(getattr(act_data, "prep_action_used", 0) or 0)
                 safe_prior_count += int(getattr(act_data, "safe_prior_used", 0) or 0)
                 safe_action_count += int(getattr(act_data, "safe_action_used", 0) or 0)
                 safe_flash_prior_count += safe_is_flash * int(getattr(act_data, "safe_prior_used", 0) or 0)
@@ -193,6 +197,8 @@ class EpisodeRunner:
                         f"flash_pot_avg:{flash_potential_sum / max(1, state_eval_count):.3f} "
                         f"safe_prior:{safe_prior_count} "
                         f"safe_action:{safe_action_count} "
+                        f"prep_prior:{prep_prior_count} "
+                        f"prep_action:{prep_action_count} "
                         f"safe_flash_steps:{safe_flash_step_count} "
                         f"safe_flash_prior:{safe_flash_prior_count} "
                         f"safe_margin_avg:{safe_action_margin_sum / max(1, state_eval_count):.3f} "
@@ -260,6 +266,8 @@ class EpisodeRunner:
                             "flash_potential": round(flash_potential_sum / max(1, state_eval_count), 4),
                             "safe_prior_count": safe_prior_count,
                             "safe_action_count": safe_action_count,
+                            "prep_prior_count": prep_prior_count,
+                            "prep_action_count": prep_action_count,
                             "safe_flash_step_count": safe_flash_step_count,
                             "safe_flash_prior_count": safe_flash_prior_count,
                             "safe_action_margin": round(safe_action_margin_sum / max(1, state_eval_count), 4),
