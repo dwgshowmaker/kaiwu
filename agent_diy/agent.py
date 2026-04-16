@@ -174,7 +174,7 @@ class Agent(BaseAgent):
 
     def _select_greedy_action(self, probs, obs_data):
         safe_context = self._get_safe_action_context(obs_data, len(probs))
-        if safe_context is not None and self._calc_safe_prior_weight(safe_context) >= 0.28:
+        if safe_context is not None and self._calc_safe_prior_weight(safe_context) >= 0.24:
             return safe_context["safe_action"]
         return self._legal_sample(probs, use_max=True)
 
@@ -221,16 +221,18 @@ class Agent(BaseAgent):
             safe_margin = safe_context["safe_action_margin"]
             safe_path_len = safe_context["safe_path_len"]
             safe_trap_risk = safe_context["safe_trap_risk"]
-            if danger_level < 0.45 or safe_path_len < 2.0 or safe_trap_risk >= 0.7:
+            if danger_level < 0.35 or safe_path_len < 1.0 or safe_trap_risk >= 0.85:
                 return 0.0
-            if safe_margin < 0.15 and danger_level < 0.8:
+            if safe_margin < -0.1 and danger_level < 0.78:
                 return 0.0
 
-            prior_weight = 0.10 + 0.24 * danger_level + 0.06 * np.clip(safe_margin, 0.0, 2.0)
-            prior_weight *= max(0.35, 1.0 - 0.65 * np.clip(safe_trap_risk, 0.0, 1.0))
-            if safe_path_len <= 2.0:
-                prior_weight *= 0.8
-            return min(0.42, float(prior_weight))
+            prior_weight = 0.12 + 0.28 * danger_level + 0.05 * np.clip(safe_margin, 0.0, 2.0)
+            if danger_level >= 0.82:
+                prior_weight += 0.04
+            prior_weight *= max(0.45, 1.0 - 0.5 * np.clip(safe_trap_risk, 0.0, 1.0))
+            if safe_path_len <= 1.0:
+                prior_weight *= 0.85
+            return min(0.48, float(prior_weight))
 
         prior_weight = min(0.58, 0.14 + 0.44 * danger_level)
         if safe_context["safe_action_margin"] > 0.75:

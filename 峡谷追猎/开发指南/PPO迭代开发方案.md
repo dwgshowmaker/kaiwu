@@ -501,6 +501,46 @@ Phase 2 初版引入 16 动作和安全先验后，训练启动阶段可能出�
 - `400` 步后，如果仍能保持较低危险并与怪物拉开安全距离，给轻量正奖励
 - late-game 的坏闪现和 trap 闪现惩罚更强，促使策略把闪现留给真正关键的高压时刻
 
+### 7.2 Phase 2.3 回调型修正
+
+在 `2026-04-16 21:04` 左右的新日志中，出现了一个很明确的信号：
+
+- 平均分数、后半段平均分数和平均宝箱数都比上一轮下降
+- `good_flash_count` 下降，`bad_flash_count` 和 `flash_trap_count` 上升
+- `blocked_count`、`stuck_count` 也同步上升
+
+这说明上一轮 Phase 2.2 的方向没有错，但“闪现约束 + trap 判定”收得太紧了，导致策略重新变得保守和犹豫。
+
+因此 Phase 2.3 不再继续加码惩罚，而是做一版回调型修正：
+
+1. 放松高危闪现先验
+
+- 高危险状态下，允许闪现相对 `best_move` 只有小幅优势时也能进入先验混合
+- 对闪现的 `safe_path_len` 和 `safe_trap_risk` 阈值放宽，避免把本来能救命的紧急闪现直接压掉
+
+2. 放松 trap 判定
+
+- `flash_review` 不再因为“没有明显连续安全步”就直接记成 `flash_trap_count`
+- 更强调真正的坏信号：`blocked`、`near_death`、明显增距不足，以及持续高危但没拉开距离
+
+3. 下调 late-game 坏闪现惩罚
+
+- late-game 仍然保留坏闪现惩罚，但强度低于 Phase 2.2
+- 目标不是鼓励乱闪，而是避免策略因为怕惩罚而再次学成“不敢闪”
+
+4. 新增闪现诊断指标
+
+- `safe_flash_step_count`
+- `safe_flash_prior_count`
+- `safe_action_margin`
+- `safe_trap_risk`
+
+这样下一轮看日志时，可以直接判断：
+
+- 安全先验到底有多少步在推荐闪现
+- 安全闪现的评分优势是否太小
+- 当前策略是否仍然被高估的 `trap_risk` 压住
+
 ### 8. 风险点
 
 1. 动作空间变大后探索会更难前期训练曲线可能变差，这是正常现象。
@@ -524,6 +564,10 @@ Phase 2 初版引入 16 动作和安全先验后，训练启动阶段可能出�
 - `flash_trap_count`
 - `flash_hold_count`
 - `late_game_steps`
+- `safe_flash_step_count`
+- `safe_flash_prior_count`
+- `safe_action_margin`
+- `safe_trap_risk`
 
 本轮继续优化后，额外重点看：
 
@@ -532,6 +576,7 @@ Phase 2 初版引入 16 动作和安全先验后，训练启动阶段可能出�
 - `late_game_steps` 是否继续上升
 - `500+` 步对局数是否增加
 - 是否开始出现首批 `WIN`
+- `safe_flash_prior_count / safe_flash_step_count` 是否回到更合理区间
 
 ---
 

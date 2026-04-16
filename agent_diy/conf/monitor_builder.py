@@ -215,6 +215,46 @@ def build_monitor():
         )
         .end_panel()
         .add_panel(
+            name="safe_flash_step_count",
+            name_en="safe_flash_step_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="safe_flash_step_count",
+            expr="avg(safe_flash_step_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="safe_flash_prior_count",
+            name_en="safe_flash_prior_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="safe_flash_prior_count",
+            expr="avg(safe_flash_prior_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="safe_action_margin",
+            name_en="safe_action_margin",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="safe_action_margin",
+            expr="avg(safe_action_margin{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="safe_trap_risk",
+            name_en="safe_trap_risk",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="safe_trap_risk",
+            expr="avg(safe_trap_risk{})",
+        )
+        .end_panel()
+        .add_panel(
             name="good_flash_count",
             name_en="good_flash_count",
             type="line",

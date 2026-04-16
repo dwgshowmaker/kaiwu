@@ -90,10 +90,21 @@ class EpisodeRunner:
             min_dist_count = 0
             safe_prior_count = 0
             safe_action_count = 0
+            safe_flash_prior_count = 0
+            safe_flash_step_count = 0
+            safe_action_margin_sum = 0.0
+            safe_trap_risk_sum = 0.0
+            state_eval_count = 0
 
             self.logger.info(f"Episode {self.episode_cnt} start")
 
             while not done:
+                safe_is_flash = int(getattr(obs_data, "safe_is_flash", 0) or 0)
+                safe_flash_step_count += safe_is_flash
+                safe_action_margin_sum += float(getattr(obs_data, "safe_action_margin", 0.0) or 0.0)
+                safe_trap_risk_sum += float(getattr(obs_data, "safe_trap_risk", 0.0) or 0.0)
+                state_eval_count += 1
+
                 act_data_list = self.agent.predict(list_obs_data=[obs_data])
                 if not act_data_list:
                     self.logger.error(
@@ -104,6 +115,7 @@ class EpisodeRunner:
                 act_data = act_data_list[0]
                 safe_prior_count += int(getattr(act_data, "safe_prior_used", 0) or 0)
                 safe_action_count += int(getattr(act_data, "safe_action_used", 0) or 0)
+                safe_flash_prior_count += safe_is_flash * int(getattr(act_data, "safe_prior_used", 0) or 0)
                 act = self.agent.action_process(act_data)
 
                 env_reward, env_obs = self.env.step(act)
@@ -155,7 +167,11 @@ class EpisodeRunner:
                         f"flash_gain:{float(_remain_info.get('flash_escape_gain', 0.0)):.3f} "
                         f"late_game:{_remain_info.get('late_game_steps', 0)} "
                         f"safe_prior:{safe_prior_count} "
-                        f"safe_action:{safe_action_count}"
+                        f"safe_action:{safe_action_count} "
+                        f"safe_flash_steps:{safe_flash_step_count} "
+                        f"safe_flash_prior:{safe_flash_prior_count} "
+                        f"safe_margin_avg:{safe_action_margin_sum / max(1, state_eval_count):.3f} "
+                        f"safe_trap_avg:{safe_trap_risk_sum / max(1, state_eval_count):.3f}"
                     )
 
                 frame = SampleData(
@@ -202,6 +218,10 @@ class EpisodeRunner:
                             "late_game_steps": int(_remain_info.get("late_game_steps", 0)),
                             "safe_prior_count": safe_prior_count,
                             "safe_action_count": safe_action_count,
+                            "safe_flash_step_count": safe_flash_step_count,
+                            "safe_flash_prior_count": safe_flash_prior_count,
+                            "safe_action_margin": round(safe_action_margin_sum / max(1, state_eval_count), 4),
+                            "safe_trap_risk": round(safe_trap_risk_sum / max(1, state_eval_count), 4),
                         }
                         self.monitor.put_data({os.getpid(): monitor_data})
                         self.last_report_monitor_time = now
