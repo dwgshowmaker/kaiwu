@@ -29,6 +29,11 @@ CLOSE_THREAT_DISTANCE = 8.0
 DANGER_PRIOR_DISTANCE = 18.0
 ESCAPE_LOOKAHEAD_STEPS = 3
 BLOCKED_ACTION_COOLDOWN = 4
+FLASH_ORTHOGONAL_DISTANCE = 10
+FLASH_DIAGONAL_DISTANCE = 8
+GOOD_FLASH_ESCAPE_GAIN = 6.0
+BAD_FLASH_ESCAPE_GAIN = 2.0
+MOVE_ACTION_NUM = 8
 
 DIRECTION_TO_VECTOR = {
     0: (0.0, 0.0),
@@ -51,6 +56,14 @@ ACTION_TO_VECTOR = {
     5: (-1, 1),
     6: (0, 1),
     7: (1, 1),
+    8: (FLASH_ORTHOGONAL_DISTANCE, 0),
+    9: (FLASH_DIAGONAL_DISTANCE, -FLASH_DIAGONAL_DISTANCE),
+    10: (0, -FLASH_ORTHOGONAL_DISTANCE),
+    11: (-FLASH_DIAGONAL_DISTANCE, -FLASH_DIAGONAL_DISTANCE),
+    12: (-FLASH_ORTHOGONAL_DISTANCE, 0),
+    13: (-FLASH_DIAGONAL_DISTANCE, FLASH_DIAGONAL_DISTANCE),
+    14: (0, FLASH_ORTHOGONAL_DISTANCE),
+    15: (FLASH_DIAGONAL_DISTANCE, FLASH_DIAGONAL_DISTANCE),
 }
 
 
@@ -99,6 +112,9 @@ class Preprocessor:
         self.total_blocked_count = 0
         self.danger_steps = 0
         self.near_death_count = 0
+        self.good_flash_count = 0
+        self.bad_flash_count = 0
+        self.flash_escape_gain_sum = 0.0
 
     def feature_process(self, env_obs, last_action):
         """Process env_obs into feature vector, legal_action mask, reward and metrics."""
@@ -438,6 +454,7 @@ class Preprocessor:
         escape_norm,
         danger_level,
     ):
+        is_flash = action >= MOVE_ACTION_NUM
         move_norm = max(_distance(move_dx, move_dz), 1e-6)
         escape_alignment = (move_dx * escape_dx + move_dz * escape_dz) / (move_norm * escape_norm)
 
@@ -445,28 +462,37 @@ class Preprocessor:
         after_dz = closest_monster_rel[1] - move_dz
         dist_gain = _distance(after_dx, after_dz) - min_monster_dist
 
-        path_len = self._escape_corridor_len(map_info, move_dx, move_dz)
+        path_len = self._escape_corridor_len(map_info, move_dx, move_dz, is_flash=is_flash)
         open_neighbors = self._local_open_count(map_info, move_dx, move_dz)
         is_passable = self._is_adjacent_passable(map_info, move_dx, move_dz)
 
         blocked_cooldown = self.blocked_action_cooldowns[action]
         passable_score = 1.0 if is_passable else -6.0
         dead_end_penalty = 0.0 if path_len >= 2 else -1.5 * danger_level
+        flash_penalty = -2.2 if is_flash and danger_level < 0.45 else 0.0
+        flash_bonus = 0.6 * danger_level if is_flash else 0.0
+        gain_weight = 1.75 if is_flash else 1.4
+        path_weight = 0.12 if is_flash else 0.45
 
         score = (
-            1.4 * dist_gain
+            gain_weight * dist_gain
             + 1.1 * escape_alignment
-            + 0.45 * path_len
+            + path_weight * path_len
             + 0.12 * open_neighbors
             + passable_score
             + dead_end_penalty
+            + flash_bonus
+            + flash_penalty
             - 0.55 * blocked_cooldown
         )
         return score, path_len
 
-    def _escape_corridor_len(self, map_info, dx, dz):
+    def _escape_corridor_len(self, map_info, dx, dz, is_flash=False):
         if map_info is None or len(map_info) == 0:
             return ESCAPE_LOOKAHEAD_STEPS
+
+        if is_flash:
+            return float(self._is_offset_passable(map_info, dx, dz)) * ESCAPE_LOOKAHEAD_STEPS
 
         corridor_len = 0
         for step in range(1, ESCAPE_LOOKAHEAD_STEPS + 1):
@@ -477,10 +503,11 @@ class Preprocessor:
 
     def _local_open_count(self, map_info, dx, dz):
         if map_info is None or len(map_info) == 0:
-            return 8
+            return MOVE_ACTION_NUM
 
         open_count = 0
-        for ndx, ndz in ACTION_TO_VECTOR.values():
+        for action in range(MOVE_ACTION_NUM):
+            ndx, ndz = ACTION_TO_VECTOR[action]
             if self._is_offset_passable(map_info, dx + ndx, dz + ndz):
                 open_count += 1
         return open_count
@@ -503,6 +530,7 @@ class Preprocessor:
         treasure_count = int(hero.get("treasure_collected_count", env_info.get("treasures_collected", 0)))
         buff_count = int(env_info.get("collected_buff", 0))
         flash_count = int(env_info.get("flash_count", 0))
+        flash_escape_gain = 0.0
 
         reward = 0.02
         if danger_level >= 0.25:
@@ -521,7 +549,25 @@ class Preprocessor:
             buff_delta = max(0, buff_count - self.last_buff_count)
             reward += (0.7 if min_monster_dist <= 25.0 else 0.5) * buff_delta
 
-            if self.last_hero_pos == hero_pos and 0 <= int(last_action) < 8:
+            flash_delta = max(0, flash_count - self.last_flash_count)
+            if flash_delta > 0:
+                flash_escape_gain = dist_delta
+                self.flash_escape_gain_sum += flash_escape_gain
+                got_flash_value = treasure_delta > 0 or buff_delta > 0
+                if (
+                    flash_escape_gain >= GOOD_FLASH_ESCAPE_GAIN
+                    or (self.last_min_monster_dist <= CLOSE_THREAT_DISTANCE and flash_escape_gain >= 4.0)
+                    or got_flash_value
+                ):
+                    self.good_flash_count += flash_delta
+                    reward += 0.45 * flash_delta + 0.05 * float(np.clip(flash_escape_gain, 0.0, 10.0))
+                    if got_flash_value:
+                        reward += 0.2
+                elif flash_escape_gain <= BAD_FLASH_ESCAPE_GAIN and not got_flash_value:
+                    self.bad_flash_count += flash_delta
+                    reward -= 0.18 * flash_delta
+
+            if self.last_hero_pos == hero_pos and 0 <= int(last_action) < Config.ACTION_NUM:
                 self.stuck_steps += 1
             else:
                 self.stuck_steps = 0
@@ -555,6 +601,9 @@ class Preprocessor:
             "blocked_this_step": float(self.blocked_this_step),
             "danger_steps": float(self.danger_steps),
             "near_death_count": float(self.near_death_count),
+            "good_flash_count": float(self.good_flash_count),
+            "bad_flash_count": float(self.bad_flash_count),
+            "flash_escape_gain": float(self.flash_escape_gain_sum),
             "total_score": float(env_info.get("total_score", 0.0)),
             "danger_level": float(danger_level),
         }

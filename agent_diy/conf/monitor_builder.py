@@ -214,6 +214,36 @@ def build_monitor():
             expr="avg(safe_action_count{})",
         )
         .end_panel()
+        .add_panel(
+            name="good_flash_count",
+            name_en="good_flash_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="good_flash_count",
+            expr="avg(good_flash_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="bad_flash_count",
+            name_en="bad_flash_count",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="bad_flash_count",
+            expr="avg(bad_flash_count{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="flash_escape_gain",
+            name_en="flash_escape_gain",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="flash_escape_gain",
+            expr="avg(flash_escape_gain{})",
+        )
+        .end_panel()
         .end_group()
         .build()
     )

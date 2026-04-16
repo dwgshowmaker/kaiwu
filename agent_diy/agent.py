@@ -95,9 +95,19 @@ class Agent(BaseAgent):
     def load_model(self, path=None, id="1"):
         """Load model checkpoint."""
         model_file_path = f"{path}/model.ckpt-{str(id)}.pkl"
-        self.model.load_state_dict(torch.load(model_file_path, map_location=self.device))
-        if self.logger:
-            self.logger.info(f"load model {model_file_path} successfully")
+        try:
+            state_dict = torch.load(model_file_path, map_location=self.device)
+            self.model.load_state_dict(state_dict)
+            if self.logger:
+                self.logger.info(f"load model {model_file_path} successfully")
+        except FileNotFoundError:
+            if self.logger:
+                self.logger.warning(f"skip loading missing model {model_file_path}")
+        except RuntimeError as exc:
+            if self.logger:
+                self.logger.warning(
+                    f"skip incompatible model {model_file_path}, keep current weights: {exc}"
+                )
 
     def observation_process(self, env_obs):
         """Convert raw env_obs to ObsData and remain_info."""

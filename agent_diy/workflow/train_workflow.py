@@ -135,11 +135,15 @@ class EpisodeRunner:
                         f"total_reward:{total_reward:.3f} "
                         f"treasure:{env_info.get('treasures_collected', 0)} "
                         f"buff:{env_info.get('collected_buff', 0)} "
+                        f"flash:{env_info.get('flash_count', 0)} "
                         f"stuck:{_remain_info.get('stuck_count', 0)} "
                         f"blocked:{_remain_info.get('blocked_count', 0)} "
                         f"danger:{float(_remain_info.get('danger_level', 0.0)):.3f} "
                         f"danger_steps:{_remain_info.get('danger_steps', 0)} "
                         f"near_death:{_remain_info.get('near_death_count', 0)} "
+                        f"good_flash:{_remain_info.get('good_flash_count', 0)} "
+                        f"bad_flash:{_remain_info.get('bad_flash_count', 0)} "
+                        f"flash_gain:{float(_remain_info.get('flash_escape_gain', 0.0)):.3f} "
                         f"safe_prior:{safe_prior_count} "
                         f"safe_action:{safe_action_count}"
                     )
@@ -180,6 +184,9 @@ class EpisodeRunner:
                             "danger_level": round(float(_remain_info.get("danger_level", 0.0)), 4),
                             "danger_steps": int(_remain_info.get("danger_steps", 0)),
                             "near_death_count": int(_remain_info.get("near_death_count", 0)),
+                            "good_flash_count": int(_remain_info.get("good_flash_count", 0)),
+                            "bad_flash_count": int(_remain_info.get("bad_flash_count", 0)),
+                            "flash_escape_gain": round(float(_remain_info.get("flash_escape_gain", 0.0)), 4),
                             "safe_prior_count": safe_prior_count,
                             "safe_action_count": safe_action_count,
                         }
