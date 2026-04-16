@@ -365,6 +365,26 @@ def build_monitor():
         )
         .end_panel()
         .add_panel(
+            name="备战有闪",
+            name_en="prep_flash_ready_steps",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="prep_flash_ready_steps",
+            expr="avg(prep_flash_ready_steps{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="备战有buff",
+            name_en="prep_buff_active_steps",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="prep_buff_active_steps",
+            expr="avg(prep_buff_active_steps{})",
+        )
+        .end_panel()
+        .add_panel(
             name="500步有buff",
             name_en="buff_ready_at_speedup",
             type="line",

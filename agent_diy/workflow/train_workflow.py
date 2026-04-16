@@ -178,6 +178,8 @@ class EpisodeRunner:
                         f"post_speedup:{_remain_info.get('post_speedup_steps', 0)} "
                         f"post_nobuff:{_remain_info.get('post_speedup_buffless_steps', 0)} "
                         f"post_unready:{_remain_info.get('post_speedup_unready_steps', 0)} "
+                        f"prep_flash_ready:{_remain_info.get('prep_flash_ready_steps', 0)} "
+                        f"prep_buff_active:{_remain_info.get('prep_buff_active_steps', 0)} "
                         f"buff_ready:{_remain_info.get('buff_ready_at_speedup', 0)} "
                         f"flash_ready:{_remain_info.get('flash_ready_at_speedup', 0)} "
                         f"loop:{_remain_info.get('loop_count', 0)} "
@@ -248,6 +250,8 @@ class EpisodeRunner:
                             "post_speedup_unready_steps": int(
                                 _remain_info.get("post_speedup_unready_steps", 0)
                             ),
+                            "prep_flash_ready_steps": int(_remain_info.get("prep_flash_ready_steps", 0)),
+                            "prep_buff_active_steps": int(_remain_info.get("prep_buff_active_steps", 0)),
                             "buff_ready_at_speedup": int(_remain_info.get("buff_ready_at_speedup", 0)),
                             "flash_ready_at_speedup": int(_remain_info.get("flash_ready_at_speedup", 0)),
                             "state_potential": round(state_potential_sum / max(1, state_eval_count), 4),
