@@ -174,6 +174,12 @@ class EpisodeRunner:
                         f"flash_hold:{_remain_info.get('flash_hold_count', 0)} "
                         f"flash_gain:{float(_remain_info.get('flash_escape_gain', 0.0)):.3f} "
                         f"late_game:{_remain_info.get('late_game_steps', 0)} "
+                        f"prep_speedup:{_remain_info.get('speedup_prep_steps', 0)} "
+                        f"post_speedup:{_remain_info.get('post_speedup_steps', 0)} "
+                        f"post_nobuff:{_remain_info.get('post_speedup_buffless_steps', 0)} "
+                        f"post_unready:{_remain_info.get('post_speedup_unready_steps', 0)} "
+                        f"buff_ready:{_remain_info.get('buff_ready_at_speedup', 0)} "
+                        f"flash_ready:{_remain_info.get('flash_ready_at_speedup', 0)} "
                         f"loop:{_remain_info.get('loop_count', 0)} "
                         f"state_pot:{float(_remain_info.get('state_potential', 0.0)):.3f} "
                         f"safety_pot:{float(_remain_info.get('safety_potential', 0.0)):.3f} "
@@ -234,6 +240,16 @@ class EpisodeRunner:
                             "flash_hold_count": int(_remain_info.get("flash_hold_count", 0)),
                             "flash_escape_gain": round(float(_remain_info.get("flash_escape_gain", 0.0)), 4),
                             "late_game_steps": int(_remain_info.get("late_game_steps", 0)),
+                            "speedup_prep_steps": int(_remain_info.get("speedup_prep_steps", 0)),
+                            "post_speedup_steps": int(_remain_info.get("post_speedup_steps", 0)),
+                            "post_speedup_buffless_steps": int(
+                                _remain_info.get("post_speedup_buffless_steps", 0)
+                            ),
+                            "post_speedup_unready_steps": int(
+                                _remain_info.get("post_speedup_unready_steps", 0)
+                            ),
+                            "buff_ready_at_speedup": int(_remain_info.get("buff_ready_at_speedup", 0)),
+                            "flash_ready_at_speedup": int(_remain_info.get("flash_ready_at_speedup", 0)),
                             "state_potential": round(state_potential_sum / max(1, state_eval_count), 4),
                             "safety_potential": round(safety_potential_sum / max(1, state_eval_count), 4),
                             "resource_potential": round(resource_potential_sum / max(1, state_eval_count), 4),

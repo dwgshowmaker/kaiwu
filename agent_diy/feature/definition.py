@@ -26,6 +26,9 @@ ObsData = create_cls(
     safe_action_margin=None,
     safe_is_flash=None,
     safe_trap_risk=None,
+    speedup_prep_flag=None,
+    post_speedup_flag=None,
+    speed_ready_flag=None,
 )
 
 ActData = create_cls(

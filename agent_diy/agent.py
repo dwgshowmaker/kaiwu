@@ -124,6 +124,9 @@ class Agent(BaseAgent):
             safe_action_margin=metrics.get("safe_action_margin", 0.0),
             safe_is_flash=metrics.get("safe_is_flash", 0.0),
             safe_trap_risk=metrics.get("safe_trap_risk", 0.0),
+            speedup_prep_flag=metrics.get("speedup_prep_flag", 0.0),
+            post_speedup_flag=metrics.get("post_speedup_flag", 0.0),
+            speed_ready_flag=metrics.get("speed_ready_flag", 0.0),
         )
         remain_info = {"reward": reward}
         remain_info.update(metrics)
@@ -210,6 +213,9 @@ class Agent(BaseAgent):
             "safe_action_margin": float(getattr(obs_data, "safe_action_margin", 0.0)),
             "safe_is_flash": bool(getattr(obs_data, "safe_is_flash", 0.0)),
             "safe_trap_risk": float(getattr(obs_data, "safe_trap_risk", 0.0)),
+            "speedup_prep": bool(getattr(obs_data, "speedup_prep_flag", 0.0)),
+            "post_speedup": bool(getattr(obs_data, "post_speedup_flag", 0.0)),
+            "speed_ready": bool(getattr(obs_data, "speed_ready_flag", 0.0)),
         }
 
     def _calc_safe_prior_weight(self, safe_context):
@@ -221,22 +227,44 @@ class Agent(BaseAgent):
             safe_margin = safe_context["safe_action_margin"]
             safe_path_len = safe_context["safe_path_len"]
             safe_trap_risk = safe_context["safe_trap_risk"]
-            if danger_level < 0.35 or safe_path_len < 1.0 or safe_trap_risk >= 0.85:
+            post_speedup = safe_context["post_speedup"]
+            speedup_prep = safe_context["speedup_prep"]
+            speed_ready = safe_context["speed_ready"]
+
+            trap_limit = 0.85
+            danger_floor = 0.35
+            margin_floor = -0.1
+            if post_speedup:
+                trap_limit = 0.88
+                danger_floor = 0.3
+                margin_floor = -0.2
+            elif speedup_prep and not speed_ready:
+                trap_limit = 0.83
+
+            if danger_level < danger_floor or safe_path_len < 1.0 or safe_trap_risk >= trap_limit:
                 return 0.0
-            if safe_margin < -0.1 and danger_level < 0.78:
+            if safe_margin < margin_floor and danger_level < 0.78:
                 return 0.0
 
             prior_weight = 0.12 + 0.28 * danger_level + 0.05 * np.clip(safe_margin, 0.0, 2.0)
+            if post_speedup:
+                prior_weight += 0.04
+                if not speed_ready:
+                    prior_weight += 0.06
+            elif speedup_prep and not speed_ready:
+                prior_weight += 0.02
             if danger_level >= 0.82:
                 prior_weight += 0.04
             prior_weight *= max(0.45, 1.0 - 0.5 * np.clip(safe_trap_risk, 0.0, 1.0))
             if safe_path_len <= 1.0:
                 prior_weight *= 0.85
-            return min(0.48, float(prior_weight))
+            return min(0.56 if post_speedup else 0.48, float(prior_weight))
 
         prior_weight = min(0.58, 0.14 + 0.44 * danger_level)
         if safe_context["safe_action_margin"] > 0.75:
             prior_weight = min(0.62, prior_weight + 0.04)
+        if safe_context["post_speedup"] and not safe_context["speed_ready"]:
+            prior_weight = min(0.64, prior_weight + 0.04)
         return float(prior_weight)
 
     def _normalize_probs(self, probs):

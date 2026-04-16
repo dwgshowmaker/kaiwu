@@ -325,6 +325,66 @@ def build_monitor():
         )
         .end_panel()
         .add_panel(
+            name="备战步数",
+            name_en="speedup_prep_steps",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="speedup_prep_steps",
+            expr="avg(speedup_prep_steps{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="加速步数",
+            name_en="post_speedup_steps",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="post_speedup_steps",
+            expr="avg(post_speedup_steps{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="无buff步数",
+            name_en="post_speedup_buffless_steps",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="post_speedup_buffless_steps",
+            expr="avg(post_speedup_buffless_steps{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="无备战步",
+            name_en="post_speedup_unready_steps",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="post_speedup_unready_steps",
+            expr="avg(post_speedup_unready_steps{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="500步有buff",
+            name_en="buff_ready_at_speedup",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="buff_ready_at_speedup",
+            expr="avg(buff_ready_at_speedup{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="500步有闪",
+            name_en="flash_ready_at_speedup",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="flash_ready_at_speedup",
+            expr="avg(flash_ready_at_speedup{})",
+        )
+        .end_panel()
+        .add_panel(
             name="状态势能",
             name_en="state_potential",
             type="line",

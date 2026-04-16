@@ -962,5 +962,46 @@ git commit -m "improve diy feature and reward shaping"
 - 还新增 `state_pot_avg/safety_pot_avg/resource_pot_avg/flash_pot_avg`
 - monitor 上报也改为按整局平均势能记录，避免只看终局瞬间造成误判
 
+### 7.5 Phase2.5 加速阶段优化
+
+根据 `2026-04-16 21/22` 两轮环境日志，当前瓶颈已经很明确：
+
+- 进入怪物加速阶段的局有 `119` 局
+- 其中 `102` 局死在 `500-549` 步
+- 只有 `17` 局能撑过 `550+`
+- `buff>0` 的局撑过 `550` 的比例，明显高于 `buff=0`
+
+这说明当前 Phase 1 / Phase 2 已经把“前 500 步基础生存”做起来了，但还没有把“500 步前准备、500 步后切换生存模式”做出来。
+
+因此继续留在 `agent_diy` 的 Phase 1 / Phase 2 范围内，新增一个 `Phase2.5` 子阶段：
+
+1. 500 步前准备
+
+- 在怪物加速前约 `80` 步进入 `speedup_prep` 阶段
+- 提高 buff 势能、buff 奖励和 buff 工具位标记
+- 同时下调这段时间的宝箱偏好
+- 对低危险、无收益的闪现增加额外惩罚，减少把闪现浪费在 500 步前
+
+2. 500 步后生存
+
+- 当怪物速度进入 `2` 格/步后，进入 `post_speedup` 阶段
+- 如果没有 buff，则进一步降低宝箱吸引力，强化开阔区、走廊长度、边缘风险相关的安全偏好
+- 如果既没有 buff 又没有可用闪现，则增加额外惩罚，明确告诉 PPO 这是“未准备好”的坏状态
+
+3. 新增诊断指标
+
+- `speedup_prep_steps`
+- `post_speedup_steps`
+- `post_speedup_buffless_steps`
+- `post_speedup_unready_steps`
+- `buff_ready_at_speedup`
+- `flash_ready_at_speedup`
+
+这样下一轮看日志时，可以直接判断：
+
+- 模型是否在 500 步前主动做准备
+- 500 步后到底是“无 buff 死亡”还是“有 buff 但路线选择差”
+- 闪现到底是被乱用掉了，还是关键时刻还保留着
+
 实际开发目录选择 `agent_diy`，`agent_ppo` 保持为参考基线。
 如果按这个顺序推进，开发风险最低，收益也最稳定。
