@@ -14,15 +14,15 @@
 1. 先做 **特征 + 奖励** 升级
 2. 再做 **16 动作闪现**
 3. 然后做 **Phase2 收尾：长时序 credit + 势能收敛 + prior 退火**
-4. 再做 **PPO + GRU/LSTM**
-5. 最后再做 **21x21 + CNN 地图分支**
+4. 再做 **21x21 + CNN 地图分支**
+5. 最后再做 **PPO + GRU/LSTM**
 
 该顺序的核心原则是：
 
 - 先解决“信息不足、目标不对齐”的问题
 - 再释放环境中最强的动作能力
-- 再提升泛化
-- 最后才增加模型复杂度
+- 再强化当前帧空间观测
+- 最后再补跨帧时序记忆
 
 工程落地原则是：
 
@@ -85,8 +85,8 @@
 | Phase 0 | DIY 骨架迁移                | 在 `agent_diy` 中复刻一个可运行 PPO 基线       | 是             |
 | Phase 1 | 特征 + 奖励升级             | 让策略真正学会“保命 + 抢分”                    | 是             |
 | Phase 2 | 16 动作闪现 + 收尾优化      | 解决 `500` 步前准备与 `500+` 生存断层          | 是             |
-| Phase 3 | PPO + GRU/LSTM              | 解决部分可观测与长时序记忆问题                  | 主线下一步     |
-| Phase 4 | 21x21 + CNN 地图分支        | 提升地形、走廊、开阔区与近身逃生判断            | 在 Phase 3 后  |
+| Phase 3 | 21x21 + CNN 地图分支        | 提升地形、走廊、开阔区与近身逃生判断            | 主线下一步     |
+| Phase 4 | PPO + GRU/LSTM              | 解决部分可观测与长时序记忆问题                  | 在 Phase 3 后  |
 
 ---
 
@@ -581,58 +581,7 @@ Phase 2 初版引入 16 动作和安全先验后，训练启动阶段可能出�
 
 ---
 
-## 六、Phase 3：PPO + GRU/LSTM
-
-### 1. 阶段目标
-
-这一阶段不再继续堆手工奖励或手工先验，而是正式补上时序记忆能力，解决下面三个问题：
-
-- 视野受限下的部分可观测问题
-- `450-500` 步准备行为与 `500+` 生存结果之间的长时序 credit assignment
-- 对 `safe_prior / prep_prior` 的长期依赖
-
-### 2. 改动范围
-
-- `agent_diy/model/model.py`
-- `agent_diy/agent.py`
-- `agent_diy/algorithm/algorithm.py`
-- `agent_diy/feature/definition.py`
-- `agent_diy/workflow/train_workflow.py`
-
-### 3. 推荐做法
-
-保持当前 `Phase 2` 的奖励、动作空间和主要监控先不大动，只在现有 PPO 主干后增加轻量 `GRU` 或 `LSTM`。
-
-建议顺序：
-
-1. 先实现 `MLP/CNN encoder -> GRU/LSTM -> actor/critic`
-2. 训练按固定序列长度切块，补齐 hidden state 传递与 reset
-3. 保留 `legal action mask`
-4. 继续保留 `safe_prior / prep_prior`，但只作为过渡保护，后续继续退火
-
-### 4. 实施要求
-
-- 首轮只做轻量 recurrent 版，不和大规模 reward 改写绑在一起
-- 首轮不和 curriculum 绑定
-- 首轮不和 `21x21 + CNN` 绑定，先验证“记忆”单独是否带来提升
-- 训练日志必须新增 hidden state 相关稳定性检查项
-
-### 5. 重点观察指标
-
-- `550+`、`600+` 占比是否继续上升
-- `buff_ready_at_speedup` 是否更稳定
-- `safe_scale_avg / prep_scale_avg` 下降后，late-game 是否还能稳住
-- `500-549` 步死亡占比是否下降
-
-### 6. Phase 3 验收标准
-
-- 明显优于当前非 recurrent `Phase 2` 基线
-- 出现更稳定的 `600+`，而不是偶发单局高分
-- `safe_prior` 退火后，表现不明显崩塌
-
----
-
-## 七、Phase 4：21x21 + CNN 地图分支
+## 六、Phase 3：21x21 + CNN 地图分支
 
 ### 1. 阶段目标
 
@@ -670,7 +619,7 @@ Phase 2 初版引入 16 动作和安全先验后，训练启动阶段可能出�
 - 不直接把 `21x21` 全拍平成大向量喂给 MLP
 - 不首轮就上过深 CNN
 - 不和 curriculum、分层动作一起首轮绑定
-- 如果 `Phase 3` 尚未稳定，不提前单独切到 `Phase 4`
+- 如果 `Phase 2` 尚未稳定，不提前单独切到 `Phase 3`
 
 ### 5. 重点观察指标
 
@@ -679,11 +628,62 @@ Phase 2 初版引入 16 动作和安全先验后，训练启动阶段可能出�
 - `550+ / 600+` 是否优于多尺度 MLP 版
 - 近身高危局里 `good_flash / bad_flash` 是否改善
 
-### 6. Phase 4 验收标准
+### 6. Phase 3 验收标准
 
-- 同等训练资源下，稳定优于 `Phase 3`
+- 同等训练资源下，稳定优于当前多尺度 MLP `Phase 2`
 - 曲线更稳，不依赖少数高分 checkpoint
 - 推理耗时和显存占用仍在可接受范围内
+
+---
+
+## 七、Phase 4：PPO + GRU/LSTM
+
+### 1. 阶段目标
+
+这一阶段不再继续堆手工奖励或手工先验，而是在更强的 `21x21 + CNN` 空间编码基础上，正式补上时序记忆能力，解决下面三个问题：
+
+- 视野受限下的部分可观测问题
+- `450-500` 步准备行为与 `500+` 生存结果之间的长时序 credit assignment
+- 对 `safe_prior / prep_prior` 的长期依赖
+
+### 2. 改动范围
+
+- `agent_diy/model/model.py`
+- `agent_diy/agent.py`
+- `agent_diy/algorithm/algorithm.py`
+- `agent_diy/feature/definition.py`
+- `agent_diy/workflow/train_workflow.py`
+
+### 3. 推荐做法
+
+保持 `Phase 3` 的地图编码、奖励、动作空间和主要监控先不大动，只在现有编码器后增加轻量 `GRU` 或 `LSTM`。
+
+建议顺序：
+
+1. 先实现 `CNN/MLP encoder -> GRU/LSTM -> actor/critic`
+2. 训练按固定序列长度切块，补齐 hidden state 传递与 reset
+3. 保留 `legal action mask`
+4. 继续保留 `safe_prior / prep_prior`，但只作为过渡保护，后续继续退火
+
+### 4. 实施要求
+
+- 首轮只做轻量 recurrent 版，不和大规模 reward 改写绑在一起
+- 首轮不和 curriculum 绑定
+- 训练日志必须新增 hidden state 相关稳定性检查项
+- 如果 `Phase 3` 的 CNN 版本尚未稳定，不提前单独切到 `Phase 4`
+
+### 5. 重点观察指标
+
+- `550+`、`600+` 占比是否继续上升
+- `buff_ready_at_speedup` 是否更稳定
+- `safe_scale_avg / prep_scale_avg` 下降后，late-game 是否还能稳住
+- `500-549` 步死亡占比是否下降
+
+### 6. Phase 4 验收标准
+
+- 明显优于当前非 recurrent `Phase 3` 基线
+- 出现更稳定的 `600+`，而不是偶发单局高分
+- `safe_prior` 退火后，表现不明显崩塌
 
 ### 7. 当前不进入主线的方向
 
@@ -750,30 +750,30 @@ Phase 2 初版引入 16 动作和安全先验后，训练启动阶段可能出�
 
 优先任务：
 
-1. 在现有 PPO 上接入 `GRU/LSTM`
-2. 先保持 reward、动作空间和环境配置基本不变
-3. 做序列采样、隐藏状态管理和日志补齐
-4. 固定评测配置做阶段对比
-
-完成标准：
-
-- `550+ / 600+` 占比继续抬升
-- `buff_ready_at_speedup` 和 late-game 生存更稳定
-- 不依赖强手工 prior 时仍能稳住
-
-### 第 5 周及以后：再做 Phase 4
-
-优先任务：
-
-1. 保留最优 Phase 3 方案
+1. 保留最优 `Phase 2` 方案
 2. 把地图分支升级到 `21x21 + CNN`
 3. 先只动地图编码，不同时大改 reward 与动作层
+4. 固定评测配置做阶段对比
 
 完成标准：
 
 - 近身绕墙、窄路、开阔区判断继续改善
 - `blocked / stuck / flash_trap` 继续下降
 - `550+ / 600+` 指标优于纯 MLP 版本
+
+### 第 5 周及以后：再做 Phase 4
+
+优先任务：
+
+1. 在 `Phase 3` 的 `21x21 + CNN` 基线之上接入 `GRU/LSTM`
+2. 先保持 reward、动作空间和环境配置基本不变
+3. 做序列采样、隐藏状态管理和日志补齐
+
+完成标准：
+
+- `550+ / 600+` 占比继续抬升
+- `buff_ready_at_speedup` 和 late-game 生存更稳定
+- 不依赖强手工 prior 时仍能稳住
 
 - 明确确认“模型结构升级”本身带来增益
 
@@ -1098,7 +1098,7 @@ git commit -m "improve diy feature and reward shaping"
 - 是否已经站在局部开阔区
 - 是否正在沿着窄路被压缩走位
 
-因此在 Phase 2 收尾阶段，不直接跳到 Phase 3，而是先做一个观测表达升级：
+因此在 Phase 2 收尾阶段，先做观测表达升级也是合理的，这也正是当前主线把 `21x21 + CNN` 前置到 `Phase 3` 的原因：
 
 1. 地图特征改为多尺度
 
