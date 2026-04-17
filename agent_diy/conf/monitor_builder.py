@@ -464,6 +464,46 @@ def build_monitor():
             expr="avg(prep_action_count{})",
         )
         .end_panel()
+        .add_panel(
+            name="备战势能",
+            name_en="readiness_potential",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="readiness_potential",
+            expr="avg(readiness_potential{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="credit_weight",
+            name_en="credit_weight",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="credit_weight",
+            expr="avg(credit_weight{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="safe_prior_scale",
+            name_en="safe_prior_scale",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="safe_prior_scale",
+            expr="avg(safe_prior_scale{})",
+        )
+        .end_panel()
+        .add_panel(
+            name="prep_prior_scale",
+            name_en="prep_prior_scale",
+            type="line",
+        )
+        .add_metric(
+            metrics_name="prep_prior_scale",
+            expr="avg(prep_prior_scale{})",
+        )
+        .end_panel()
         .end_group()
         .build()
     )

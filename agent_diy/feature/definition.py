@@ -44,8 +44,10 @@ ActData = create_cls(
     value=None,
     prep_prior_used=None,
     prep_action_used=None,
+    prep_prior_scale=None,
     safe_prior_used=None,
     safe_action_used=None,
+    safe_prior_scale=None,
 )
 
 SampleData = create_cls(
@@ -60,13 +62,14 @@ SampleData = create_cls(
     next_value=Config.VALUE_NUM,
     advantage=Config.VALUE_NUM,
     prob=Config.ACTION_NUM,
+    credit_weight=Config.VALUE_NUM,
 )
 
 
 def sample_process(list_sample_data):
     """Fill next_value and compute GAE advantage."""
     for i in range(len(list_sample_data) - 1):
-        list_sample_data[i].next_value = list_sample_data[i + 1].value
+        list_sample_data[i].next_value = list_sample_data[i + 1].value * (1.0 - list_sample_data[i].done)
 
     _calc_gae(list_sample_data)
     return list_sample_data
@@ -78,7 +81,8 @@ def _calc_gae(list_sample_data):
     gamma = Config.GAMMA
     lamda = Config.LAMDA
     for sample in reversed(list_sample_data):
-        delta = -sample.value + sample.reward + gamma * sample.next_value
-        gae = gae * gamma * lamda + delta
+        not_done = 1.0 - sample.done
+        delta = sample.reward + gamma * sample.next_value * not_done - sample.value
+        gae = delta + gamma * lamda * not_done * gae
         sample.advantage = gae
         sample.reward_sum = gae + sample.value

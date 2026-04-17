@@ -48,7 +48,7 @@ FLASH_LOW_DANGER_THRESHOLD = 0.45
 FLASH_CLEAR_DANGER_THRESHOLD = 0.4
 FLASH_TRAP_DANGER_THRESHOLD = 0.7
 LATE_GAME_SAFE_DISTANCE = 10.0
-POTENTIAL_GAMMA = 0.99
+POTENTIAL_GAMMA = Config.GAMMA
 RESOURCE_POTENTIAL_DISTANCE = 45.0
 BUFF_POTENTIAL_DISTANCE = 36.0
 FLASH_HOLD_POTENTIAL_GAIN = 0.08
@@ -1115,6 +1115,18 @@ class Preprocessor:
             is_flash_preserve_window=is_flash_preserve_window,
             is_buff_ready_window=is_buff_ready_window,
             speed_ready=speed_ready,
+            speed_gap=speedup_context["speed_gap"],
+            prep_urgency=prep_urgency,
+        )
+        credit_weight = self._calc_credit_weight(
+            danger_level=danger_level,
+            has_buff=has_buff,
+            speed_ready=speed_ready,
+            safe_trap_risk=safe_trap_risk,
+            is_speedup_prep=is_speedup_prep,
+            is_post_speedup=is_post_speedup,
+            is_flash_preserve_window=is_flash_preserve_window,
+            is_buff_ready_window=is_buff_ready_window,
             prep_urgency=prep_urgency,
         )
 
@@ -1142,13 +1154,13 @@ class Preprocessor:
                 self.buff_ready_at_speedup = int(has_buff)
                 self.flash_ready_at_speedup = int(flash_ready)
                 if has_buff and flash_ready:
-                    reward += 0.5
+                    reward += 0.32
                 elif has_buff:
-                    reward += 0.42
+                    reward += 0.24
                 elif flash_ready:
-                    reward += 0.08
+                    reward += 0.04
                 else:
-                    reward -= 0.26
+                    reward -= 0.18
 
         for milestone, bonus in SURVIVAL_MILESTONES.items():
             if self.step_no >= milestone and milestone not in self.survival_milestones:
@@ -1385,6 +1397,8 @@ class Preprocessor:
             "safety_potential": float(potential_parts["safety"]),
             "resource_potential": float(potential_parts["resource"]),
             "flash_potential": float(potential_parts["flash"]),
+            "readiness_potential": float(potential_parts["readiness"]),
+            "credit_weight": float(credit_weight),
         }
         return [float(reward)], metrics
 
@@ -1405,6 +1419,7 @@ class Preprocessor:
         is_flash_preserve_window,
         is_buff_ready_window,
         speed_ready,
+        speed_gap,
         prep_urgency,
     ):
         safety_potential = 0.58 * (1.0 - danger_level)
@@ -1486,14 +1501,85 @@ class Preprocessor:
                 flash_potential *= 0.7
         flash_potential = float(np.clip(flash_potential, 0.0, 0.3))
 
+        readiness_potential = 0.0
+        if is_speedup_prep:
+            prep_gate = 0.45 + 0.55 * prep_urgency
+            if has_buff:
+                readiness_potential += 0.12 + 0.08 * prep_gate
+            elif nearest_buff_dist < MAX_MAP_DISTANCE:
+                buff_progress = 1.0 - _norm(nearest_buff_dist, BUFF_POTENTIAL_DISTANCE)
+                readiness_potential += (0.08 + 0.14 * prep_gate) * buff_progress
+                if is_buff_ready_window:
+                    readiness_potential += 0.04 * buff_progress
+            if flash_ready:
+                readiness_potential += 0.04 + 0.04 * prep_gate
+                if is_flash_preserve_window:
+                    readiness_potential += 0.03
+            elif is_flash_preserve_window and danger_level < 0.45:
+                readiness_potential += 0.01 * (1.0 - danger_level)
+            if speed_ready:
+                readiness_potential += 0.04 + 0.04 * prep_gate
+            if safe_path_len >= 2.0 and safe_trap_risk <= 0.35:
+                readiness_potential += 0.03 * prep_gate
+        if is_post_speedup:
+            if has_buff:
+                readiness_potential += 0.14
+            elif nearest_buff_dist < MAX_MAP_DISTANCE:
+                readiness_potential += 0.05 * (1.0 - _norm(nearest_buff_dist, BUFF_POTENTIAL_DISTANCE))
+            if flash_ready:
+                readiness_potential += 0.05
+            if speed_ready:
+                readiness_potential += 0.04
+            elif speed_gap > 0.0:
+                readiness_potential *= 0.55
+        if not speed_ready and (is_speedup_prep or is_post_speedup):
+            readiness_potential *= 0.8
+        readiness_potential = float(np.clip(readiness_potential, 0.0, 0.38))
+
         total_potential = float(
-            np.clip(safety_potential + resource_potential + flash_potential, 0.0, 1.25)
+            np.clip(
+                safety_potential + resource_potential + flash_potential + readiness_potential,
+                0.0,
+                1.55,
+            )
         )
         return total_potential, {
             "safety": safety_potential,
             "resource": resource_potential,
             "flash": flash_potential,
+            "readiness": readiness_potential,
         }
+
+    def _calc_credit_weight(
+        self,
+        danger_level,
+        has_buff,
+        speed_ready,
+        safe_trap_risk,
+        is_speedup_prep,
+        is_post_speedup,
+        is_flash_preserve_window,
+        is_buff_ready_window,
+        prep_urgency,
+    ):
+        credit_weight = 1.0
+        if is_speedup_prep:
+            credit_weight += 0.08
+        if is_flash_preserve_window:
+            credit_weight += 0.06
+        if is_buff_ready_window:
+            credit_weight += 0.12
+        if is_post_speedup:
+            credit_weight += 0.18
+        if not speed_ready and (is_speedup_prep or is_post_speedup):
+            credit_weight += 0.08 + 0.04 * prep_urgency
+        if has_buff and (is_speedup_prep or is_post_speedup):
+            credit_weight += 0.04
+        if danger_level >= 0.55:
+            credit_weight += 0.04
+        if safe_trap_risk >= 0.6:
+            credit_weight += 0.04
+        return float(np.clip(credit_weight, 1.0, Config.CREDIT_WEIGHT_CLIP))
 
     def _danger_from_dist(self, min_monster_dist):
         if min_monster_dist > DANGER_PRIOR_DISTANCE:

@@ -47,6 +47,7 @@ class Algorithm:
         advantage = torch.stack([f.advantage for f in list_sample_data]).to(self.device)
         old_value = torch.stack([f.value for f in list_sample_data]).to(self.device)
         reward_sum = torch.stack([f.reward_sum for f in list_sample_data]).to(self.device)
+        credit_weight = torch.stack([f.credit_weight for f in list_sample_data]).to(self.device)
 
         self.model.set_train_mode()
         self.optimizer.zero_grad()
@@ -62,6 +63,7 @@ class Algorithm:
             advantage=advantage,
             old_value=old_value,
             reward_sum=reward_sum,
+            credit_weight=credit_weight,
         )
 
         total_loss.backward()
@@ -79,6 +81,7 @@ class Algorithm:
                 "policy_loss": round(info_list[1].item(), 4),
                 "entropy_loss": round(info_list[2].item(), 4),
                 "reward": round(reward.mean().item(), 4),
+                "credit_weight": round(credit_weight.mean().item(), 4),
             }
             if self.logger:
                 self.logger.info(
@@ -101,6 +104,7 @@ class Algorithm:
         advantage,
         old_value,
         reward_sum,
+        credit_weight,
     ):
         """Compute standard PPO loss."""
         prob_dist = self._masked_softmax(logits, legal_action)
@@ -110,9 +114,12 @@ class Algorithm:
         old_action_prob = (one_hot * old_prob).sum(1, keepdim=True).clamp(1e-9)
         ratio = new_prob / old_action_prob
         adv = advantage.view(-1, 1)
+        adv = (adv - adv.mean()) / (adv.std(unbiased=False) + Config.ADV_NORM_EPS)
+        weight = credit_weight.view(-1, 1)
+        weight = weight / weight.mean().clamp(min=1e-6)
         policy_loss1 = -ratio * adv
         policy_loss2 = -ratio.clamp(1 - self.clip_param, 1 + self.clip_param) * adv
-        policy_loss = torch.maximum(policy_loss1, policy_loss2).mean()
+        policy_loss = (torch.maximum(policy_loss1, policy_loss2) * weight).mean()
 
         value_clip = old_value + (value_pred - old_value).clamp(-self.clip_param, self.clip_param)
         value_loss = (
@@ -120,10 +127,14 @@ class Algorithm:
             * torch.maximum(
                 torch.square(reward_sum - value_pred),
                 torch.square(reward_sum - value_clip),
-            ).mean()
+            )
+            * weight
         )
+        value_loss = value_loss.mean()
 
-        entropy_loss = (-prob_dist * torch.log(prob_dist.clamp(1e-9, 1))).sum(1).mean()
+        entropy_loss = (
+            (-prob_dist * torch.log(prob_dist.clamp(1e-9, 1))).sum(1, keepdim=True) * weight
+        ).mean()
         total_loss = self.vf_coef * value_loss + policy_loss - self.var_beta * entropy_loss
 
         return total_loss, [value_loss, policy_loss, entropy_loss]

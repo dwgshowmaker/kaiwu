@@ -101,6 +101,10 @@ class EpisodeRunner:
             safety_potential_sum = 0.0
             resource_potential_sum = 0.0
             flash_potential_sum = 0.0
+            readiness_potential_sum = 0.0
+            credit_weight_sum = 0.0
+            safe_prior_scale_sum = 0.0
+            prep_prior_scale_sum = 0.0
 
             self.logger.info(f"Episode {self.episode_cnt} start")
 
@@ -121,8 +125,10 @@ class EpisodeRunner:
                 act_data = act_data_list[0]
                 prep_prior_count += int(getattr(act_data, "prep_prior_used", 0) or 0)
                 prep_action_count += int(getattr(act_data, "prep_action_used", 0) or 0)
+                prep_prior_scale_sum += float(getattr(act_data, "prep_prior_scale", 0.0) or 0.0)
                 safe_prior_count += int(getattr(act_data, "safe_prior_used", 0) or 0)
                 safe_action_count += int(getattr(act_data, "safe_action_used", 0) or 0)
+                safe_prior_scale_sum += float(getattr(act_data, "safe_prior_scale", 0.0) or 0.0)
                 safe_flash_prior_count += safe_is_flash * int(getattr(act_data, "safe_prior_used", 0) or 0)
                 act = self.agent.action_process(act_data)
 
@@ -144,6 +150,8 @@ class EpisodeRunner:
                 safety_potential_sum += float(_remain_info.get("safety_potential", 0.0) or 0.0)
                 resource_potential_sum += float(_remain_info.get("resource_potential", 0.0) or 0.0)
                 flash_potential_sum += float(_remain_info.get("flash_potential", 0.0) or 0.0)
+                readiness_potential_sum += float(_remain_info.get("readiness_potential", 0.0) or 0.0)
+                credit_weight_sum += float(_remain_info.get("credit_weight", 1.0) or 1.0)
                 if "min_monster_dist" in _remain_info:
                     min_dist_sum += float(_remain_info["min_monster_dist"])
                     min_dist_count += 1
@@ -191,16 +199,21 @@ class EpisodeRunner:
                         f"safety_pot:{float(_remain_info.get('safety_potential', 0.0)):.3f} "
                         f"resource_pot:{float(_remain_info.get('resource_potential', 0.0)):.3f} "
                         f"flash_pot:{float(_remain_info.get('flash_potential', 0.0)):.3f} "
+                        f"ready_pot:{float(_remain_info.get('readiness_potential', 0.0)):.3f} "
                         f"state_pot_avg:{state_potential_sum / max(1, state_eval_count):.3f} "
                         f"safety_pot_avg:{safety_potential_sum / max(1, state_eval_count):.3f} "
                         f"resource_pot_avg:{resource_potential_sum / max(1, state_eval_count):.3f} "
                         f"flash_pot_avg:{flash_potential_sum / max(1, state_eval_count):.3f} "
+                        f"ready_pot_avg:{readiness_potential_sum / max(1, state_eval_count):.3f} "
                         f"safe_prior:{safe_prior_count} "
                         f"safe_action:{safe_action_count} "
                         f"prep_prior:{prep_prior_count} "
                         f"prep_action:{prep_action_count} "
                         f"safe_flash_steps:{safe_flash_step_count} "
                         f"safe_flash_prior:{safe_flash_prior_count} "
+                        f"credit_w_avg:{credit_weight_sum / max(1, state_eval_count):.3f} "
+                        f"safe_scale_avg:{safe_prior_scale_sum / max(1, state_eval_count):.3f} "
+                        f"prep_scale_avg:{prep_prior_scale_sum / max(1, state_eval_count):.3f} "
                         f"safe_margin_avg:{safe_action_margin_sum / max(1, state_eval_count):.3f} "
                         f"safe_trap_avg:{safe_trap_risk_sum / max(1, state_eval_count):.3f}"
                     )
@@ -216,6 +229,7 @@ class EpisodeRunner:
                     next_value=np.zeros(1, dtype=np.float32),
                     advantage=np.zeros(1, dtype=np.float32),
                     prob=np.array(act_data.prob, dtype=np.float32),
+                    credit_weight=np.array([float(_remain_info.get("credit_weight", 1.0))], dtype=np.float32),
                 )
                 collector.append(frame)
 
@@ -264,10 +278,16 @@ class EpisodeRunner:
                             "safety_potential": round(safety_potential_sum / max(1, state_eval_count), 4),
                             "resource_potential": round(resource_potential_sum / max(1, state_eval_count), 4),
                             "flash_potential": round(flash_potential_sum / max(1, state_eval_count), 4),
+                            "readiness_potential": round(
+                                readiness_potential_sum / max(1, state_eval_count), 4
+                            ),
+                            "credit_weight": round(credit_weight_sum / max(1, state_eval_count), 4),
                             "safe_prior_count": safe_prior_count,
                             "safe_action_count": safe_action_count,
                             "prep_prior_count": prep_prior_count,
                             "prep_action_count": prep_action_count,
+                            "safe_prior_scale": round(safe_prior_scale_sum / max(1, state_eval_count), 4),
+                            "prep_prior_scale": round(prep_prior_scale_sum / max(1, state_eval_count), 4),
                             "safe_flash_step_count": safe_flash_step_count,
                             "safe_flash_prior_count": safe_flash_prior_count,
                             "safe_action_margin": round(safe_action_margin_sum / max(1, state_eval_count), 4),

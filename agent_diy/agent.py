@@ -42,6 +42,7 @@ class Agent(BaseAgent):
         self.algorithm = Algorithm(self.model, self.optimizer, self.device, logger, monitor)
         self.preprocessor = Preprocessor()
         self.last_action = -1
+        self.total_obs_seen = 0
         self.logger = logger
         self.monitor = monitor
         super().__init__(agent_type, device, logger, monitor)
@@ -58,9 +59,10 @@ class Agent(BaseAgent):
 
         logits, value, prob = self._run_model(feature, legal_action)
         prob = self._normalize_probs(prob)
-        prob, prep_prior_used = self._apply_prep_prior(prob, list_obs_data[0])
+        prep_prior_scale, safe_prior_scale = self._get_prior_anneal_scales()
+        prob, prep_prior_used = self._apply_prep_prior(prob, list_obs_data[0], prep_prior_scale)
         prob = self._normalize_probs(prob)
-        prob, safe_prior_used = self._apply_safety_prior(prob, list_obs_data[0])
+        prob, safe_prior_used = self._apply_safety_prior(prob, list_obs_data[0], safe_prior_scale)
         prob = self._normalize_probs(prob)
 
         action = self._legal_sample(prob, use_max=False)
@@ -76,8 +78,10 @@ class Agent(BaseAgent):
                 value=value,
                 prep_prior_used=int(prep_prior_used),
                 prep_action_used=int(prep_prior_used and action == prep_action),
+                prep_prior_scale=float(prep_prior_scale),
                 safe_prior_used=int(safe_prior_used),
                 safe_action_used=int(safe_prior_used and action == safe_action),
+                safe_prior_scale=float(safe_prior_scale),
             )
         ]
 
@@ -118,6 +122,7 @@ class Agent(BaseAgent):
 
     def observation_process(self, env_obs):
         """Convert raw env_obs to ObsData and remain_info."""
+        self.total_obs_seen += 1
         feature, legal_action, reward, metrics = self.preprocessor.feature_process(env_obs, self.last_action)
         obs_data = ObsData(
             feature=list(feature),
@@ -187,17 +192,18 @@ class Agent(BaseAgent):
 
     def _select_greedy_action(self, probs, obs_data):
         safe_context = self._get_safe_action_context(obs_data, len(probs))
-        if safe_context is not None and self._calc_safe_prior_weight(safe_context) >= 0.24:
+        _, safe_prior_scale = self._get_prior_anneal_scales()
+        if safe_context is not None and self._calc_safe_prior_weight(safe_context) * safe_prior_scale >= 0.24:
             return safe_context["safe_action"]
         return self._legal_sample(probs, use_max=True)
 
-    def _apply_safety_prior(self, probs, obs_data):
+    def _apply_safety_prior(self, probs, obs_data, prior_scale):
         """Blend model policy with a danger-only escape prior for early PPO stability."""
         safe_context = self._get_safe_action_context(obs_data, len(probs))
         if safe_context is None:
             return probs, False
 
-        prior_weight = self._calc_safe_prior_weight(safe_context)
+        prior_weight = self._calc_safe_prior_weight(safe_context) * prior_scale
         if prior_weight <= 1e-6:
             return probs, False
 
@@ -210,13 +216,13 @@ class Agent(BaseAgent):
             return probs, False
         return mixed, True
 
-    def _apply_prep_prior(self, probs, obs_data):
+    def _apply_prep_prior(self, probs, obs_data, prior_scale):
         """Lightly bias safe pre-speedup states toward buff acquisition without overriding escape."""
         prep_context = self._get_prep_action_context(obs_data, len(probs))
         if prep_context is None:
             return probs, False
 
-        prior_weight = self._calc_prep_prior_weight(prep_context)
+        prior_weight = self._calc_prep_prior_weight(prep_context) * prior_scale
         if prior_weight <= 1e-6:
             return probs, False
 
@@ -331,6 +337,14 @@ class Agent(BaseAgent):
         if safe_context["post_speedup"] and not safe_context["speed_ready"]:
             prior_weight = min(0.64, prior_weight + 0.04)
         return float(prior_weight)
+
+    def _get_prior_anneal_scales(self):
+        start = Config.PRIOR_ANNEAL_OBS_START
+        end = max(start + 1, Config.PRIOR_ANNEAL_OBS_END)
+        progress = float(np.clip((self.total_obs_seen - start) / (end - start), 0.0, 1.0))
+        safe_scale = 1.0 - progress * (1.0 - Config.SAFE_PRIOR_MIN_SCALE)
+        prep_scale = 1.0 - progress * (1.0 - Config.PREP_PRIOR_MIN_SCALE)
+        return float(prep_scale), float(safe_scale)
 
     def _normalize_probs(self, probs):
         """Clamp and normalize probabilities to a numerically safe distribution."""

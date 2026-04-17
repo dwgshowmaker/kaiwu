@@ -38,9 +38,15 @@ class Config:
     VALUE_NUM = 1
     VALUE_SHAPE = (VALUE_NUM,)
 
-    # PPO hyperparameters.
-    GAMMA = 0.99
-    LAMDA = 0.95
+    # PPO hyperparameters tuned for longer-horizon post-500 credit assignment.
+    GAMMA = 0.995
+    LAMDA = 0.97
+    ADV_NORM_EPS = 1e-6
+    CREDIT_WEIGHT_CLIP = 1.6
+    PRIOR_ANNEAL_OBS_START = 20000
+    PRIOR_ANNEAL_OBS_END = 180000
+    SAFE_PRIOR_MIN_SCALE = 0.35
+    PREP_PRIOR_MIN_SCALE = 0.25
     INIT_LEARNING_RATE_START = 0.0003
     START_LR = INIT_LEARNING_RATE_START
     BETA_START = 0.001
