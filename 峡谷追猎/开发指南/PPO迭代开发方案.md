@@ -1122,3 +1122,43 @@ git commit -m "improve diy feature and reward shaping"
 - `550+` 占比是否提升
 - `blocked / stuck / flash_trap` 是否进一步下降
 - 是否开始出现稳定的 `600+`
+
+### 7.9 Phase2.9 备战退火与 Buff 路由修正
+
+根据 `2026-04-17 20` 点日志，当前 `Phase 2` 又暴露出一个很具体的问题：
+
+- learner `global step` 已经到 `2500+`
+- 但 `safe_scale_avg / prep_scale_avg` 已经长期贴近最小值
+- `prep_buff_active` 极少
+- `buff_ready_at_speedup` 几乎为 `0`
+- 死亡仍大量集中在 `500-549`
+
+这说明上一轮的 `prior` 退火虽然方向没错，但退得过早了，而且 `450-500` 的 buff 路由仍然不够强。
+
+因此继续留在 `Phase 2`，补一轮更针对性的修正：
+
+1. 放慢 `safe_prior / prep_prior` 退火
+
+- 退火阈值按“观测步数”重新标定，而不是按 learner 的 `global step` 直觉估计
+- `safe_prior` 和 `prep_prior` 分开使用不同退火区间
+- `prep_prior` 的最小保留强度高于 `safe_prior`
+
+2. 强化 `450-500` 的 buff 路由
+
+- `prep_action` 的危险阈值适度放宽
+- 对“朝最近 buff 靠近”的动作给更高评分
+- 当 buff 已经不远时，允许较低门槛触发 `prep_action`
+
+3. 继续压低最后 `50` 步的错误目标
+
+- 无 buff 时，这段时间进一步下调宝箱奖励
+- 如果明明已经接近 buff 还去拿宝箱，给轻惩罚
+- `readiness_potential`、`buff progress reward` 与 `credit_weight` 同步抬高
+
+4. 这一轮的观察重点
+
+- `prep_prior_count / prep_action_count` 是否抬升
+- `prep_buff_active_steps` 是否不再接近 `0`
+- `buff_ready_at_speedup` 是否开始稳定出现
+- `500-549` 步死亡占比是否下降
+- `safe_scale_avg / prep_scale_avg` 是否不再过早贴底

@@ -43,10 +43,14 @@ class Config:
     LAMDA = 0.97
     ADV_NORM_EPS = 1e-6
     CREDIT_WEIGHT_CLIP = 1.6
-    PRIOR_ANNEAL_OBS_START = 20000
-    PRIOR_ANNEAL_OBS_END = 180000
-    SAFE_PRIOR_MIN_SCALE = 0.35
-    PREP_PRIOR_MIN_SCALE = 0.25
+    # Prior anneal is observation-count based, so the schedule must match
+    # the real environment step scale rather than learner global_step.
+    SAFE_PRIOR_ANNEAL_OBS_START = 250000
+    SAFE_PRIOR_ANNEAL_OBS_END = 2500000
+    PREP_PRIOR_ANNEAL_OBS_START = 300000
+    PREP_PRIOR_ANNEAL_OBS_END = 3200000
+    SAFE_PRIOR_MIN_SCALE = 0.45
+    PREP_PRIOR_MIN_SCALE = 0.55
     INIT_LEARNING_RATE_START = 0.0003
     START_LR = INIT_LEARNING_RATE_START
     BETA_START = 0.001

@@ -271,23 +271,30 @@ class Agent(BaseAgent):
         danger_level = prep_context["danger_level"]
         prep_score = prep_context["prep_action_score"]
         target_dist = prep_context["prep_target_dist"]
-        if prep_score <= 0.0 or target_dist <= 0.0 or danger_level >= 0.58:
+        if prep_score <= -0.05 or target_dist <= 0.0:
+            return 0.0
+        danger_ceiling = 0.64 if prep_context["buff_ready_window"] else 0.6
+        if danger_level >= danger_ceiling:
             return 0.0
 
-        prior_weight = 0.06
+        prior_weight = 0.1
         if prep_context["flash_preserve_window"]:
-            prior_weight += 0.05
+            prior_weight += 0.06
         if prep_context["buff_ready_window"]:
-            prior_weight += 0.08
-        prior_weight += 0.06 * np.clip(prep_score / 2.5, 0.0, 1.0)
+            prior_weight += 0.12
+        prior_weight += 0.08 * np.clip((prep_score + 0.1) / 2.2, 0.0, 1.0)
+        if target_dist <= 28.0:
+            prior_weight += 0.04
         if target_dist <= 18.0:
-            prior_weight += 0.05
+            prior_weight += 0.06
         if target_dist <= 10.0:
-            prior_weight += 0.05
-        if danger_level >= 0.45:
-            prior_weight *= 0.6
+            prior_weight += 0.08
+        if danger_level >= 0.5:
+            prior_weight *= 0.72
+        elif danger_level >= 0.42:
+            prior_weight *= 0.84
 
-        return float(min(0.3 if prep_context["buff_ready_window"] else 0.22, prior_weight))
+        return float(min(0.44 if prep_context["buff_ready_window"] else 0.32, prior_weight))
 
     def _calc_safe_prior_weight(self, safe_context):
         danger_level = safe_context["danger_level"]
@@ -339,11 +346,14 @@ class Agent(BaseAgent):
         return float(prior_weight)
 
     def _get_prior_anneal_scales(self):
-        start = Config.PRIOR_ANNEAL_OBS_START
-        end = max(start + 1, Config.PRIOR_ANNEAL_OBS_END)
-        progress = float(np.clip((self.total_obs_seen - start) / (end - start), 0.0, 1.0))
-        safe_scale = 1.0 - progress * (1.0 - Config.SAFE_PRIOR_MIN_SCALE)
-        prep_scale = 1.0 - progress * (1.0 - Config.PREP_PRIOR_MIN_SCALE)
+        safe_start = Config.SAFE_PRIOR_ANNEAL_OBS_START
+        safe_end = max(safe_start + 1, Config.SAFE_PRIOR_ANNEAL_OBS_END)
+        prep_start = Config.PREP_PRIOR_ANNEAL_OBS_START
+        prep_end = max(prep_start + 1, Config.PREP_PRIOR_ANNEAL_OBS_END)
+        safe_progress = float(np.clip((self.total_obs_seen - safe_start) / (safe_end - safe_start), 0.0, 1.0))
+        prep_progress = float(np.clip((self.total_obs_seen - prep_start) / (prep_end - prep_start), 0.0, 1.0))
+        safe_scale = 1.0 - safe_progress * (1.0 - Config.SAFE_PRIOR_MIN_SCALE)
+        prep_scale = 1.0 - prep_progress * (1.0 - Config.PREP_PRIOR_MIN_SCALE)
         return float(prep_scale), float(safe_scale)
 
     def _normalize_probs(self, probs):
