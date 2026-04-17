@@ -25,6 +25,7 @@ MAX_FLASH_CD = 2000.0
 MAX_BUFF_DURATION = 50.0
 MAX_DIRECTIONAL_BUCKET = 5.0
 LOCAL_MAP_SIZE = 7
+CENTER_MAP_SIZE = 11
 CLOSE_THREAT_DISTANCE = 8.0
 DANGER_PRIOR_DISTANCE = 18.0
 ESCAPE_LOOKAHEAD_STEPS = 3
@@ -490,13 +491,14 @@ class Preprocessor:
         return float(dot_value > 0)
 
     def _build_local_map_features(self, map_info):
-        map_feat = np.zeros(LOCAL_MAP_SIZE * LOCAL_MAP_SIZE, dtype=np.float32)
+        coarse_feat = np.zeros(LOCAL_MAP_SIZE * LOCAL_MAP_SIZE, dtype=np.float32)
+        center_feat = np.zeros(CENTER_MAP_SIZE * CENTER_MAP_SIZE, dtype=np.float32)
         if map_info is None or len(map_info) == 0:
-            return map_feat
+            return np.concatenate([coarse_feat, center_feat]).astype(np.float32)
 
         map_arr = np.array(map_info, dtype=np.float32)
         if map_arr.ndim != 2 or map_arr.size == 0:
-            return map_feat
+            return np.concatenate([coarse_feat, center_feat]).astype(np.float32)
 
         h, w = map_arr.shape
         flat_idx = 0
@@ -507,10 +509,34 @@ class Preprocessor:
                 col_start = int(col * w / LOCAL_MAP_SIZE)
                 col_end = max(col_start + 1, int((col + 1) * w / LOCAL_MAP_SIZE))
                 block = map_arr[row_start:row_end, col_start:col_end]
-                map_feat[flat_idx] = float(np.mean(block != 0)) if block.size else 0.0
+                coarse_feat[flat_idx] = float(np.mean(block != 0)) if block.size else 0.0
                 flat_idx += 1
 
-        return map_feat
+        center_patch = self._extract_center_patch(map_arr, CENTER_MAP_SIZE)
+        center_feat[:] = center_patch.reshape(-1).astype(np.float32)
+        return np.concatenate([coarse_feat, center_feat]).astype(np.float32)
+
+    def _extract_center_patch(self, map_arr, patch_size):
+        patch = np.zeros((patch_size, patch_size), dtype=np.float32)
+        if map_arr.ndim != 2 or map_arr.size == 0:
+            return patch
+
+        h, w = map_arr.shape
+        center_row = h // 2
+        center_col = w // 2
+        radius = patch_size // 2
+
+        for prow in range(patch_size):
+            src_row = center_row - radius + prow
+            if src_row < 0 or src_row >= h:
+                continue
+            for pcol in range(patch_size):
+                src_col = center_col - radius + pcol
+                if src_col < 0 or src_col >= w:
+                    continue
+                patch[prow, pcol] = float(map_arr[src_row, src_col] != 0)
+
+        return patch
 
     def _build_legal_action(self, legal_act_raw):
         action_num = Config.ACTION_NUM

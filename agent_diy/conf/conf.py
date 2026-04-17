@@ -11,13 +11,13 @@ Configuration for the DIY PPO agent.
 
 
 class Config:
-    # Phase 2 feature dimensions (113D total).
+    # Phase 2 multi-scale map feature dimensions (234D total).
     FEATURES = [
         8,   # hero self
         16,  # monsters: 2 * 8
         10,  # treasures: 2 * 5
         10,  # buffs: 2 * 5
-        49,  # local map: 7 * 7 downsampled from local vision
+        170, # local map: coarse 7 * 7 + center 11 * 11 from local vision
         16,  # legal movement + flash actions
         4,   # progress and environment rhythm
     ]

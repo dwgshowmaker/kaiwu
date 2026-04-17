@@ -33,8 +33,8 @@ class Model(nn.Module):
         self.device = device
 
         input_dim = Config.DIM_OF_OBSERVATION
-        hidden_dim = 128
-        mid_dim = 64
+        hidden_dim = 192
+        mid_dim = 96
         action_num = Config.ACTION_NUM
         value_num = Config.VALUE_NUM
 
