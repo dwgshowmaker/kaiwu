@@ -48,14 +48,22 @@ class Agent(BaseAgent):
 
     def reset(self, env_obs=None):
         self.preprocessor.reset()
+        self.preprocessor.set_runtime_mode("eval")
         self.last_action = -1
 
     def set_curriculum_context(self, stage_name=None, episode_idx=0):
         self.preprocessor.set_curriculum_context(stage_name=stage_name, episode_idx=episode_idx)
 
+    def set_runtime_mode(self, mode):
+        self.preprocessor.set_runtime_mode(mode)
+
     def observation_process(self, env_obs, preprocessor=None, extra_info=None):
-        feature, legal_action, reward, info = self.preprocessor.feature_process(env_obs, self.last_action)
-        obs_data = ObsData(feature=list(feature), legal_action=list(legal_action))
+        feature, legal_action, action_bias, reward, info = self.preprocessor.feature_process(env_obs, self.last_action)
+        obs_data = ObsData(
+            feature=list(feature),
+            legal_action=list(legal_action),
+            action_bias=list(action_bias),
+        )
         remain_info = {"reward": reward, "info": info}
         return obs_data, remain_info
 
@@ -65,12 +73,13 @@ class Agent(BaseAgent):
 
         features = np.array([obs.feature for obs in list_obs_data], dtype=np.float32)
         legal_actions = np.array([obs.legal_action for obs in list_obs_data], dtype=np.float32)
+        action_biases = np.array([obs.action_bias for obs in list_obs_data], dtype=np.float32)
 
         logits_batch, value_batch = self._run_model(features)
         act_data_list = []
         for idx, obs_data in enumerate(list_obs_data):
             legal_action = legal_actions[idx]
-            prob = self._legal_soft_max(logits_batch[idx], legal_action)
+            prob = self._legal_soft_max(logits_batch[idx] + action_biases[idx], legal_action)
             action = self._legal_sample(prob, use_max=False)
             d_action = self._legal_sample(prob, use_max=True)
             act_data_list.append(
@@ -84,6 +93,7 @@ class Agent(BaseAgent):
         return act_data_list
 
     def exploit(self, env_obs):
+        self.preprocessor.set_runtime_mode("eval")
         obs_data, _ = self.observation_process(env_obs)
         act_data = self.predict([obs_data])[0]
         return self.action_process(act_data, is_stochastic=False)

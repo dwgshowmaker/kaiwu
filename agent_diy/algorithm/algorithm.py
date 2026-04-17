@@ -41,6 +41,7 @@ class Algorithm:
         advantage = self._stack(list_sample_data, "advantage")
         old_value = self._stack(list_sample_data, "value")
         reward_sum = self._stack(list_sample_data, "reward_sum")
+        action_bias = self._stack(list_sample_data, "action_bias")
 
         advantage = (advantage - advantage.mean()) / (advantage.std(unbiased=False) + 1e-8)
 
@@ -48,6 +49,7 @@ class Algorithm:
         self.optimizer.zero_grad()
 
         logits, value_pred = self.model(obs)
+        logits = logits + action_bias
         total_loss, info = self._compute_loss(
             logits=logits,
             value_pred=value_pred,

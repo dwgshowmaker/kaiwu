@@ -76,6 +76,7 @@ class EpisodeRunner:
 
             self.agent.reset(env_obs)
             self.agent.set_curriculum_context(stage_name=stage_name, episode_idx=self.episode_cnt)
+            self.agent.set_runtime_mode("train")
             if Config.LOAD_LATEST_ON_EPISODE_START:
                 self.agent.load_model(id="latest")
 
@@ -108,6 +109,7 @@ class EpisodeRunner:
                 frame = SampleData(
                     obs=np.array(obs_data.feature, dtype=np.float32),
                     legal_action=np.array(obs_data.legal_action, dtype=np.float32),
+                    action_bias=np.array(obs_data.action_bias, dtype=np.float32),
                     act=np.array([act_data.action[0]], dtype=np.float32),
                     reward=reward,
                     done=np.array([float(done)], dtype=np.float32),
@@ -167,11 +169,11 @@ class EpisodeRunner:
                 {
                     "map": [1, 2, 3, 4],
                     "map_random": True,
-                    "treasure_count": 8,
+                    "treasure_count": 10,
                     "buff_count": 2,
-                    "monster_interval": 550,
-                    "monster_speedup": 900,
-                    "max_step": 700,
+                    "monster_interval": 600,
+                    "monster_speedup": 1000,
+                    "max_step": 800,
                 }
             )
         elif stage_name == "stage_b_standard":
@@ -181,8 +183,8 @@ class EpisodeRunner:
                     "map_random": True,
                     "treasure_count": 10,
                     "buff_count": 2,
-                    "monster_interval": 350,
-                    "monster_speedup": 600,
+                    "monster_interval": 400,
+                    "monster_speedup": 650,
                     "max_step": 900,
                 }
             )
@@ -245,6 +247,7 @@ class EpisodeRunner:
             episode_cnt < Config.STAGE_A_MIN_EPISODES
             or avg_steps < Config.STAGE_A_TARGET_STEPS
             or avg_score < Config.STAGE_A_TARGET_SCORE
+            or avg_treasure < Config.STAGE_A_TARGET_TREASURE
         ):
             return "stage_a_survive"
 

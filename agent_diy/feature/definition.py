@@ -13,7 +13,7 @@ from common_python.utils.common_func import create_cls
 from agent_diy.conf.conf import Config
 
 
-ObsData = create_cls("ObsData", feature=None, legal_action=None)
+ObsData = create_cls("ObsData", feature=None, legal_action=None, action_bias=None)
 
 ActData = create_cls("ActData", action=None, d_action=None, prob=None, value=None)
 
@@ -21,6 +21,7 @@ SampleData = create_cls(
     "SampleData",
     obs=Config.DIM_OF_OBSERVATION,
     legal_action=Config.ACTION_NUM,
+    action_bias=Config.ACTION_NUM,
     act=1,
     reward=Config.VALUE_NUM,
     reward_sum=Config.VALUE_NUM,
