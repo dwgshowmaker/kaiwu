@@ -1,38 +1,87 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
 ###########################################################################
-# Copyright © 1998 - 2026 Tencent. All Rights Reserved.
+# Copyright 1998 - 2026 Tencent. All Rights Reserved.
 ###########################################################################
 """
-Author: Tencent AI Arena Authors
+Configuration for the DIY Gorge Chase PPO agent.
 """
 
 
-import numpy as np
-
-
-# Configuration
-# 配置，包含维度设置，算法参数设置，文件的最后一些配置是开悟平台使用不要改动
 class Config:
+    MAP_SIZE = 128
+    LOCAL_VIEW_RADIUS = 10
+    LOCAL_VIEW_SIZE = LOCAL_VIEW_RADIUS * 2 + 1
 
-    # Whether to use CNN networks
-    # 是否使用CNN网络
-    USE_CNN = False
-    VIEW_SIZE = 50 if USE_CNN else 0
+    ACTION_NUM = 16
+    ACTION_SHAPE = ACTION_NUM
+    VALUE_NUM = 1
 
-    FEATURE_VECTOR_SHAPE = (153,)
-    FEATURE_IMAGE_SHAPE = (4, VIEW_SIZE + 1, VIEW_SIZE + 1)
+    FEATURE_SPLIT_SHAPE = [
+        10,  # hero self
+        16,  # 2 monsters x 8
+        10,  # 2 treasures x 5
+        10,  # 2 buffs x 5
+        24,  # 8 directions x 3 local route stats
+        4,   # progress
+    ]
+    DIM_OF_OBSERVATION = sum(FEATURE_SPLIT_SHAPE)
 
-    ACTION_SHAPE = (8,)
-    VALUE_SHAPE = (1,)
+    GAMMA = 0.99
+    LAMDA = 0.95
+    INIT_LEARNING_RATE_START = 3e-4
+    BETA_START = 0.003
+    CLIP_PARAM = 0.2
+    VF_COEF = 1.0
+    GRAD_CLIP_RANGE = 0.5
 
-    # Discount factor GAMMA in RL
-    # RL中的回报折扣GAMMA
-    GAMMA = 0.95
+    SURVIVE_REWARD = 0.01
+    DANGER_ESCAPE_REWARD_SCALE = 0.42
+    TREASURE_REWARD = 1.55
+    BUFF_REWARD = 0.55
+    BUFF_DANGER_BONUS = 0.3
+    STUCK_PENALTY = -0.03
+    LOOP_PENALTY = -0.02
+    THREAT_PENALTY = -0.12
+    CRITICAL_THREAT_PENALTY = -0.3
+    GOOD_FLASH_REWARD = 0.3
+    BAD_FLASH_PENALTY = -0.35
+    FAIL_PENALTY = -7.5
+    COMPLETE_BONUS = 10.0
 
-    # Initial learning rate
-    # 初始的学习率
-    START_LR = 5e-4
+    DEFAULT_MAX_STEP = 1000
+    DEFAULT_TREASURE_COUNT = 10
+    DEFAULT_BUFF_COUNT = 2
+    MAX_FLASH_CD = 2000.0
+    MAX_BUFF_DURATION = 50.0
+    MAX_MONSTER_SPEED = 2.0
+    MAX_MONSTER_DIST = 32.0
+    ITEM_DISTANCE_CLIP = 40.0
+    RELATIVE_COORD_CLIP = 21.0
+    ROUTE_SCAN_LIMIT = 10
+    MAX_TRACKED_ITEMS = 2
+    CLOSE_THREAT_DIST = 8.0
+    CRITICAL_THREAT_DIST = 3.0
+    GOOD_FLASH_DISTANCE_GAIN = 0.12
+    STUCK_STREAK_LIMIT = 4
+    RECENT_ACTION_WINDOW = 12
+    RECENT_POSITION_WINDOW = 8
+    FLASH_GATE_ITEM_DIST = 8.0
+    FLASH_GATE_LOW_THREAT = 0.35
+    FLASH_GATE_HIGH_THREAT = 0.55
+    FLASH_GATE_STAGE_B_STEP = 80
+    FLASH_GATE_STAGE_C_STEP = 20
+    FLASH_GATE_RECENT_RATIO = 0.25
 
-    VALUE_LOSS_COEFF = 0.5
-    ENTROPY_LOSS_COEFF = 0.025
+    MONITOR_REPORT_INTERVAL_SEC = 60
+    MODEL_SAVE_INTERVAL_SEC = 600
+    LOAD_LATEST_ON_EPISODE_START = True
+
+    CURRICULUM_WINDOW_SIZE = 200
+    STAGE_A_MIN_EPISODES = 4000
+    STAGE_B_MIN_EPISODES = 16000
+    STAGE_A_TARGET_STEPS = 260
+    STAGE_A_TARGET_SCORE = 390.0
+    STAGE_B_TARGET_STEPS = 560
+    STAGE_B_TARGET_SCORE = 940.0
+    STAGE_B_TARGET_TREASURE = 1.2
