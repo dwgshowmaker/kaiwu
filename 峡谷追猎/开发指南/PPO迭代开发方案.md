@@ -581,158 +581,122 @@ Phase 2 初版引入 16 动作和安全先验后，训练启动阶段可能出�
 
 ---
 
-## 六、Phase 3：训练配置随机化 / 课程学习（旧版主线，已弃用）
-
-当前主线请以本文档第十三、十四、十五节为准。本节以下内容仅保留为历史记录，不再作为实际开发顺序。
+## 六、Phase 3：PPO + GRU/LSTM
 
 ### 1. 阶段目标
 
-这一阶段的目标不是单图刷分，而是提升对隐藏图和不同节奏配置的泛化能力。
+这一阶段不再继续堆手工奖励或手工先验，而是正式补上时序记忆能力，解决下面三个问题：
+
+- 视野受限下的部分可观测问题
+- `450-500` 步准备行为与 `500+` 生存结果之间的长时序 credit assignment
+- 对 `safe_prior / prep_prior` 的长期依赖
 
 ### 2. 改动范围
 
+- `agent_diy/model/model.py`
+- `agent_diy/agent.py`
+- `agent_diy/algorithm/algorithm.py`
+- `agent_diy/feature/definition.py`
 - `agent_diy/workflow/train_workflow.py`
-- `agent_diy/conf/train_env_conf.toml`
 
 ### 3. 推荐做法
 
-建议把 `train_env_conf.toml` 作为“默认上限配置”，在 `agent_diy/workflow/train_workflow.py` 中按 episode 动态调整训练难度。
+保持当前 `Phase 2` 的奖励、动作空间和主要监控先不大动，只在现有 PPO 主干后增加轻量 `GRU` 或 `LSTM`。
 
-### 4. 建议的课程学习三阶段
+建议顺序：
 
-#### Stage A：生存入门
+1. 先实现 `MLP/CNN encoder -> GRU/LSTM -> actor/critic`
+2. 训练按固定序列长度切块，补齐 hidden state 传递与 reset
+3. 保留 `legal action mask`
+4. 继续保留 `safe_prior / prep_prior`，但只作为过渡保护，后续继续退火
 
-- `map = [1, 2, 3, 4]`
-- `map_random = true`
-- `treasure_count = 8`
-- `buff_count = 2`
-- `monster_interval = 500`
-- `monster_speedup = 800`
-- `max_step = 600`
+### 4. 实施要求
 
-目标：
+- 首轮只做轻量 recurrent 版，不和大规模 reward 改写绑在一起
+- 首轮不和 curriculum 绑定
+- 首轮不和 `21x21 + CNN` 绑定，先验证“记忆”单独是否带来提升
+- 训练日志必须新增 hidden state 相关稳定性检查项
 
-- 先学会基础保命
-- 减少训练前期的大量秒死样本
+### 5. 重点观察指标
 
-#### Stage B：标准训练
-
-- `map = [1, 2, 3, 4, 5, 6, 7]`
-- `map_random = true`
-- `treasure_count = 10`
-- `buff_count = 2`
-- `monster_interval = 300`
-- `monster_speedup = 500`
-- `max_step = 800`
-
-目标：
-
-- 平衡保命与拿分
-- 开始学习更多地图结构
-
-#### Stage C：泛化冲刺
-
-- `map = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]`
-- `map_random = true`
-- `treasure_count = 10`
-- `buff_count = 2`
-- `monster_interval = -1`
-- `monster_speedup = -1`
-- `max_step = 1000`
-
-目标：
-
-- 提前适应随机节奏
-- 避免过拟合固定怪物出现时间
-
-### 5. 进阶随机化建议
-
-在课程学习跑通后，可进一步加入：
-
-- 随机地图采样权重
-- 随机 `buff_cooldown`
-- 随机 `talent_cooldown`
-- 随机 `max_step`
-
-注意：
-
-- 每次只加一种随机化
-- 加完后先观察训练是否崩掉，再继续
+- `550+`、`600+` 占比是否继续上升
+- `buff_ready_at_speedup` 是否更稳定
+- `safe_scale_avg / prep_scale_avg` 下降后，late-game 是否还能稳住
+- `500-549` 步死亡占比是否下降
 
 ### 6. Phase 3 验收标准
 
-- 不同公开地图上的分数更均衡
-- 训练后期平均分稳定，不再大幅抖动
-- 切换到默认评测配置时，性能没有明显回退
+- 明显优于当前非 recurrent `Phase 2` 基线
+- 出现更稳定的 `600+`，而不是偶发单局高分
+- `safe_prior` 退火后，表现不明显崩塌
 
 ---
 
-## 七、Phase 4：模型升级（旧版主线，已弃用）
-
-当前主线请以本文档第十三、十四、十五节为准。本节以下内容仅保留为历史记录，不再作为实际开发顺序。
+## 七、Phase 4：21x21 + CNN 地图分支
 
 ### 1. 阶段目标
 
-只有在前 3 个阶段完成后，才建议升级模型。
+这一阶段正式把环境原始 `21x21` 视野充分利用起来，解决多尺度 MLP 仍然可能存在的空间理解上限：
 
-如果前面三步没做好，直接换大模型通常只会：
+- 墙角、窄路、走廊、开阔区识别不够细
+- `500+` 近身时对死胡同和逃生走廊判断不足
+- 仅靠扁平地图向量表达的归纳偏置不够强
 
-- 训练更慢
-- 调参更难
-- 不一定涨分
+### 2. 改动范围
 
-### 2. 推荐升级顺序
+- `agent_diy/model/model.py`
+- `agent_diy/conf/conf.py`
+- `agent_diy/feature/preprocessor.py`
 
-#### 方案 1：更强的 MLP
+### 3. 推荐做法
 
-在现有结构上升级为：
+保留当前向量分支，同时新增真正的地图分支：
 
-- `input -> 256 -> 128 -> 64 -> actor / critic`
+- 输入使用原始 `21x21`
+- 地图改成多通道而不是单通道拍平
+- 先用轻量 `CNN` 编码，再与向量特征融合
 
-并尝试加入：
+建议优先保留的地图通道：
 
-- `LayerNorm`
-- `SiLU` 或 `ReLU`
+- 墙体 / 可通行区域
+- 怪物位置
+- 宝箱位置
+- buff 位置
+- 英雄当前位置
+- 最近若干步轨迹热图
 
-优点：
+### 4. 实施要求
 
-- 改动最小
-- 容易和原模型对比
+- 不直接把 `21x21` 全拍平成大向量喂给 MLP
+- 不首轮就上过深 CNN
+- 不和 curriculum、分层动作一起首轮绑定
+- 如果 `Phase 3` 尚未稳定，不提前单独切到 `Phase 4`
 
-#### 方案 2：双分支模型
+### 5. 重点观察指标
 
-将输入拆成：
+- `blocked / stuck / flash_trap` 是否继续下降
+- `500-549` 步死亡占比是否进一步下降
+- `550+ / 600+` 是否优于多尺度 MLP 版
+- 近身高危局里 `good_flash / bad_flash` 是否改善
 
-- 向量分支：hero / monster / treasure / buff / progress
-- 地图分支：局部地图特征
+### 6. Phase 4 验收标准
 
-最后融合后输出 actor / critic。
+- 同等训练资源下，稳定优于 `Phase 3`
+- 曲线更稳，不依赖少数高分 checkpoint
+- 推理耗时和显存占用仍在可接受范围内
 
-优点：
+### 7. 当前不进入主线的方向
 
-- 更符合任务结构
-- 比单纯堆大 MLP 更合理
+下面两项暂时不进入正式 Phase 主线，只保留为后续备选实验：
 
-#### 方案 3：小型 CNN 地图编码
+- 分层动作
+- 窄范围 curriculum
 
-如果保留 21x21 或 7x7 栅格地图，可以对地图分支加轻量 CNN。
+原因：
 
-适用条件：
-
-- 已确认地图特征是性能瓶颈
-- 已有稳定训练基线
-
-### 3. 不建议现在就做的事
-
-- 一上来用 LSTM / Transformer
-- 一上来做超大网络
-- 在没有稳定监控的情况下盲目加层
-
-### 4. Phase 4 验收标准
-
-- 同等训练资源下，分数高于 Phase 3
-- 曲线更稳，而不是只在个别 checkpoint 偶然更高
-- 推理耗时仍可接受
+- 当前更主要的瓶颈是时序记忆和空间观测表达
+- 分层动作工程量更大，归因更慢
+- curriculum 更适合作为平台期后的辅助突破，而不是主线下一步
 
 ---
 
@@ -1158,81 +1122,3 @@ git commit -m "improve diy feature and reward shaping"
 - `550+` 占比是否提升
 - `blocked / stuck / flash_trap` 是否进一步下降
 - 是否开始出现稳定的 `600+`
-
----
-
-## 十三、最新主线路线重排
-
-从当前日志和代码状态看，主线不再保留旧版的：
-
-- `Phase 3 = 训练配置随机化 / 课程学习`
-- `Phase 4 = 泛泛的模型升级`
-
-新的主线路线改成：
-
-1. `Phase 2` 继续收尾
-
-保留并继续推进：
-
-- `PPO/GAE` 的长时序 credit assignment 调整
-- 更彻底的 `potential-based shaping`
-- 保留硬 `mask`，退火手工 `prior`
-
-这三项都仍然属于 `Phase 2` 范围，不视为进入下一大阶段。
-
-2. 新 `Phase 3 = PPO + GRU/LSTM`
-
-核心目标：
-
-- 解决部分可观测
-- 解决 `500` 前准备到 `500+` 生存之间的长时序记忆问题
-- 让策略不再只靠单帧和手工先验
-
-3. 新 `Phase 4 = 21x21 + CNN 地图分支`
-
-核心目标：
-
-- 充分利用环境原始 `21x21` 视野
-- 提升墙角、窄路、走廊、开阔区、死胡同判断
-- 解决多尺度 MLP 仍然可能存在的空间理解上限
-
-## 十四、论文思路保留项
-
-结合当前项目，不建议主线把所有想法都一起推进。
-
-### 1. 主线保留
-
-主线保留前五项，但分阶段推进：
-
-1. `PPO/GAE` 的长时序 credit assignment 调整
-2. 更彻底的 `potential-based shaping`
-3. 保留硬 `mask`，退火手工 `prior`
-4. `PPO + GRU/LSTM`
-5. `21x21 + CNN` 地图分支
-
-其中：
-
-- 前 3 项属于 `Phase 2` 收尾
-- 第 4 项是新的 `Phase 3`
-- 第 5 项是新的 `Phase 4`
-
-### 2. 不进入当前主线
-
-下面两项暂时不进入正式 Phase 主线，只保留为备选实验：
-
-- 分层动作
-- 窄范围 curriculum
-
-原因：
-
-- 当前最主要的瓶颈还是时序记忆和空间观测表达
-- 分层动作工程量更大，收益判断更慢
-- curriculum 现在更适合作为平台期后的辅助突破手段，而不是主线下一步
-
-## 十五、当前推荐推进顺序
-
-1. 先继续验证 `Phase 2` 收尾版
-2. 如果 `550+ / 600+ / buff_ready_at_speedup` 继续上升，就再收一轮 `Phase 2`
-3. 如果 `Phase 2` 明显平台期，就优先进入 `PPO + GRU/LSTM`
-4. 如果平台期同时伴随近身地形判断仍差，再补 `21x21 + CNN`
-5. 分层动作和窄范围 curriculum 暂不进入主线
