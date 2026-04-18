@@ -1,510 +1,65 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
 ###########################################################################
-# Copyright © 1998 - 2026 Tencent. All Rights Reserved.
+# Copyright (c) 1998 - 2026 Tencent. All Rights Reserved.
 ###########################################################################
 """
-Author: Tencent AI Arena Authors
+Monitor panel configuration for the DIY Gorge Chase agent.
 """
-
 
 from kaiwudrl.common.monitor.monitor_config_builder import MonitorConfigBuilder
 
 
 def build_monitor():
-    """
-    # This function is used to create monitoring panel configurations for custom indicators.
-    # 该函数用于创建自定义指标的监控面板配置。
-    """
     monitor = MonitorConfigBuilder()
 
-    config_dict = (
-        monitor.title("峡谷追猎")
-        .add_group(
-            group_name="算法指标",
-            group_name_en="algorithm",
-        )
-        .add_panel(
-            name="累积回报",
-            name_en="reward",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="reward",
-            expr="avg(reward{})",
-        )
+    return (
+        monitor.title("Gorge Chase DIY")
+        .add_group(group_name="Algorithm", group_name_en="algorithm")
+        .add_panel(name="Reward", name_en="reward", type="line")
+        .add_metric(metrics_name="reward", expr="avg(reward{})")
         .end_panel()
-        .add_panel(
-            name="总损失",
-            name_en="total_loss",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="total_loss",
-            expr="avg(total_loss{})",
-        )
+        .add_panel(name="Total Loss", name_en="total_loss", type="line")
+        .add_metric(metrics_name="total_loss", expr="avg(total_loss{})")
         .end_panel()
-        .add_panel(
-            name="价值损失",
-            name_en="value_loss",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="value_loss",
-            expr="avg(value_loss{})",
-        )
+        .add_panel(name="Policy Loss", name_en="policy_loss", type="line")
+        .add_metric(metrics_name="policy_loss", expr="avg(policy_loss{})")
         .end_panel()
-        .add_panel(
-            name="策略损失",
-            name_en="policy_loss",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="policy_loss",
-            expr="avg(policy_loss{})",
-        )
+        .add_panel(name="Value Loss", name_en="value_loss", type="line")
+        .add_metric(metrics_name="value_loss", expr="avg(value_loss{})")
         .end_panel()
-        .add_panel(
-            name="熵损失",
-            name_en="entropy_loss",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="entropy_loss",
-            expr="avg(entropy_loss{})",
-        )
+        .add_panel(name="Entropy Loss", name_en="entropy_loss", type="line")
+        .add_metric(metrics_name="entropy_loss", expr="avg(entropy_loss{})")
         .end_panel()
-        .add_panel(
-            name="局内步数",
-            name_en="episode_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="episode_steps",
-            expr="avg(episode_steps{})",
-        )
+        .end_group()
+        .add_group(group_name="Episode", group_name_en="episode")
+        .add_panel(name="Episode Steps", name_en="episode_steps", type="line")
+        .add_metric(metrics_name="episode_steps", expr="avg(episode_steps{})")
         .end_panel()
-        .add_panel(
-            name="环境总分",
-            name_en="total_score",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="total_score",
-            expr="avg(total_score{})",
-        )
+        .add_panel(name="Total Score", name_en="total_score", type="line")
+        .add_metric(metrics_name="total_score", expr="avg(total_score{})")
         .end_panel()
-        .add_panel(
-            name="宝箱数量",
-            name_en="treasure_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="treasure_count",
-            expr="avg(treasure_count{})",
-        )
+        .add_panel(name="Treasure Count", name_en="treasure_count", type="line")
+        .add_metric(metrics_name="treasure_count", expr="avg(treasure_count{})")
         .end_panel()
-        .add_panel(
-            name="Buff数量",
-            name_en="buff_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="buff_count",
-            expr="avg(buff_count{})",
-        )
+        .add_panel(name="Buff Count", name_en="buff_count", type="line")
+        .add_metric(metrics_name="buff_count", expr="avg(buff_count{})")
         .end_panel()
-        .add_panel(
-            name="闪现次数",
-            name_en="flash_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="flash_count",
-            expr="avg(flash_count{})",
-        )
+        .add_panel(name="Flash Count", name_en="flash_count", type="line")
+        .add_metric(metrics_name="flash_count", expr="avg(flash_count{})")
         .end_panel()
-        .add_panel(
-            name="失败率",
-            name_en="fail_rate",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="fail_rate",
-            expr="avg(fail_rate{})",
-        )
+        .add_panel(name="Result", name_en="result", type="line")
+        .add_metric(metrics_name="result", expr="avg(result{})")
         .end_panel()
-        .add_panel(
-            name="平均怪物距离",
-            name_en="avg_min_monster_dist",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="avg_min_monster_dist",
-            expr="avg(avg_min_monster_dist{})",
-        )
+        .add_panel(name="Fail Rate", name_en="fail_rate", type="line")
+        .add_metric(metrics_name="fail_rate", expr="avg(fail_rate{})")
         .end_panel()
-        .add_panel(
-            name="卡住次数",
-            name_en="stuck_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="stuck_count",
-            expr="avg(stuck_count{})",
-        )
+        .add_panel(name="Avg Monster Dist", name_en="avg_min_monster_dist", type="line")
+        .add_metric(metrics_name="avg_min_monster_dist", expr="avg(avg_min_monster_dist{})")
         .end_panel()
-        .add_panel(
-            name="危险等级",
-            name_en="danger_level",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="danger_level",
-            expr="avg(danger_level{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="loop_count",
-            name_en="loop_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="loop_count",
-            expr="avg(loop_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="blocked_count",
-            name_en="blocked_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="blocked_count",
-            expr="avg(blocked_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="danger_steps",
-            name_en="danger_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="danger_steps",
-            expr="avg(danger_steps{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="near_death_count",
-            name_en="near_death_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="near_death_count",
-            expr="avg(near_death_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="safe_prior_count",
-            name_en="safe_prior_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="safe_prior_count",
-            expr="avg(safe_prior_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="safe_action_count",
-            name_en="safe_action_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="safe_action_count",
-            expr="avg(safe_action_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="安全闪现步数",
-            name_en="safe_flash_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="safe_flash_step_count",
-            expr="avg(safe_flash_step_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="安全闪现先验",
-            name_en="safe_flash_prior",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="safe_flash_prior_count",
-            expr="avg(safe_flash_prior_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="safe_action_margin",
-            name_en="safe_action_margin",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="safe_action_margin",
-            expr="avg(safe_action_margin{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="safe_trap_risk",
-            name_en="safe_trap_risk",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="safe_trap_risk",
-            expr="avg(safe_trap_risk{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="good_flash_count",
-            name_en="good_flash_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="good_flash_count",
-            expr="avg(good_flash_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="bad_flash_count",
-            name_en="bad_flash_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="bad_flash_count",
-            expr="avg(bad_flash_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="flash_escape_gain",
-            name_en="flash_escape_gain",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="flash_escape_gain",
-            expr="avg(flash_escape_gain{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="flash_trap_count",
-            name_en="flash_trap_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="flash_trap_count",
-            expr="avg(flash_trap_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="flash_hold_count",
-            name_en="flash_hold_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="flash_hold_count",
-            expr="avg(flash_hold_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="late_game_steps",
-            name_en="late_game_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="late_game_steps",
-            expr="avg(late_game_steps{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="备战步数",
-            name_en="speedup_prep_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="speedup_prep_steps",
-            expr="avg(speedup_prep_steps{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="加速步数",
-            name_en="post_speedup_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="post_speedup_steps",
-            expr="avg(post_speedup_steps{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="无buff步数",
-            name_en="post_speedup_buffless_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="post_speedup_buffless_steps",
-            expr="avg(post_speedup_buffless_steps{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="无备战步",
-            name_en="post_speedup_unready_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="post_speedup_unready_steps",
-            expr="avg(post_speedup_unready_steps{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="备战有闪",
-            name_en="prep_flash_ready_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="prep_flash_ready_steps",
-            expr="avg(prep_flash_ready_steps{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="备战有buff",
-            name_en="prep_buff_active_steps",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="prep_buff_active_steps",
-            expr="avg(prep_buff_active_steps{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="500步有buff",
-            name_en="buff_ready_at_speedup",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="buff_ready_at_speedup",
-            expr="avg(buff_ready_at_speedup{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="500步有闪",
-            name_en="flash_ready_at_speedup",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="flash_ready_at_speedup",
-            expr="avg(flash_ready_at_speedup{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="状态势能",
-            name_en="state_potential",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="state_potential",
-            expr="avg(state_potential{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="安全势能",
-            name_en="safety_potential",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="safety_potential",
-            expr="avg(safety_potential{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="资源势能",
-            name_en="resource_potential",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="resource_potential",
-            expr="avg(resource_potential{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="闪现势能",
-            name_en="flash_potential",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="flash_potential",
-            expr="avg(flash_potential{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="备战先验",
-            name_en="prep_prior_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="prep_prior_count",
-            expr="avg(prep_prior_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="备战命中",
-            name_en="prep_action_count",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="prep_action_count",
-            expr="avg(prep_action_count{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="备战势能",
-            name_en="readiness_potential",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="readiness_potential",
-            expr="avg(readiness_potential{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="credit_weight",
-            name_en="credit_weight",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="credit_weight",
-            expr="avg(credit_weight{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="safe_prior_scale",
-            name_en="safe_prior_scale",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="safe_prior_scale",
-            expr="avg(safe_prior_scale{})",
-        )
-        .end_panel()
-        .add_panel(
-            name="prep_prior_scale",
-            name_en="prep_prior_scale",
-            type="line",
-        )
-        .add_metric(
-            metrics_name="prep_prior_scale",
-            expr="avg(prep_prior_scale{})",
-        )
+        .add_panel(name="Stuck Count", name_en="stuck_count", type="line")
+        .add_metric(metrics_name="stuck_count", expr="avg(stuck_count{})")
         .end_panel()
         .end_group()
         .build()
     )
-    return config_dict

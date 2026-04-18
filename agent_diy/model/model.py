@@ -1,52 +1,46 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
 ###########################################################################
-# Copyright © 1998 - 2026 Tencent. All Rights Reserved.
+# Copyright (c) 1998 - 2026 Tencent. All Rights Reserved.
 ###########################################################################
 """
-Author: Tencent AI Arena Authors
-
-Neural network model for the DIY PPO baseline.
-DIY PPO 基线神经网络模型。
+Neural network model for the DIY Gorge Chase agent.
 """
 
+import math
 
 import torch.nn as nn
 
 from agent_diy.conf.conf import Config
 
 
-def make_fc_layer(in_features, out_features):
-    """Create a linear layer with orthogonal initialization."""
-    fc = nn.Linear(in_features, out_features)
-    nn.init.orthogonal_(fc.weight.data)
-    nn.init.zeros_(fc.bias.data)
-    return fc
+def make_fc_layer(in_features, out_features, std=math.sqrt(2.0)):
+    layer = nn.Linear(in_features, out_features)
+    nn.init.orthogonal_(layer.weight, gain=std)
+    nn.init.zeros_(layer.bias)
+    return layer
 
 
 class Model(nn.Module):
-    """Single MLP backbone + Actor/Critic dual heads."""
-
     def __init__(self, device=None):
         super().__init__()
-        self.model_name = "gorge_chase_diy_ppo"
         self.device = device
+        self.model_name = "gorge_chase_diy_ppo"
 
-        input_dim = Config.DIM_OF_OBSERVATION
-        hidden_dim = 192
-        mid_dim = 96
-        action_num = Config.ACTION_NUM
-        value_num = Config.VALUE_NUM
-
-        self.backbone = nn.Sequential(
-            make_fc_layer(input_dim, hidden_dim),
-            nn.ReLU(),
-            make_fc_layer(hidden_dim, mid_dim),
-            nn.ReLU(),
-        )
-
-        self.actor_head = make_fc_layer(mid_dim, action_num)
-        self.critic_head = make_fc_layer(mid_dim, value_num)
+        last_dim = Config.DIM_OF_OBSERVATION
+        backbone_layers = []
+        for hidden_dim in Config.MODEL_HIDDEN_DIMS:
+            backbone_layers.extend(
+                [
+                    make_fc_layer(last_dim, hidden_dim),
+                    nn.LayerNorm(hidden_dim),
+                    nn.SiLU(),
+                ]
+            )
+            last_dim = hidden_dim
+        self.backbone = nn.Sequential(*backbone_layers)
+        self.actor_head = make_fc_layer(last_dim, Config.ACTION_NUM, std=0.01)
+        self.critic_head = make_fc_layer(last_dim, Config.VALUE_NUM, std=1.0)
 
     def forward(self, obs, inference=False):
         hidden = self.backbone(obs)

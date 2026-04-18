@@ -1,59 +1,56 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
 ###########################################################################
-# Copyright © 1998 - 2026 Tencent. All Rights Reserved.
+# Copyright (c) 1998 - 2026 Tencent. All Rights Reserved.
 ###########################################################################
 """
-Author: Tencent AI Arena Authors
-
-PPO algorithm implementation for the DIY PPO baseline.
-DIY PPO 基线算法实现。
+PPO algorithm for the DIY Gorge Chase agent.
 """
-
 
 import os
 import time
 
+import numpy as np
 import torch
+
 from agent_diy.conf.conf import Config
 
 
 class Algorithm:
-    def __init__(self, model, optimizer, device=None, logger=None, monitor=None, scheduler=None):
+    def __init__(self, model, optimizer, scheduler=None, device=None, logger=None, monitor=None):
         self.device = device
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.parameters = [p for pg in self.optimizer.param_groups for p in pg["params"]]
+        self.parameters = [p for group in self.optimizer.param_groups for p in group["params"]]
         self.logger = logger
         self.monitor = monitor
 
         self.label_size = Config.ACTION_NUM
-        self.value_num = Config.VALUE_NUM
         self.var_beta = Config.BETA_START
         self.vf_coef = Config.VF_COEF
         self.clip_param = Config.CLIP_PARAM
 
-        self.last_report_monitor_time = 0
+        self.last_report_monitor_time = 0.0
         self.train_step = 0
 
     def learn(self, list_sample_data):
-        """Run one PPO update on a batch of SampleData."""
-        obs = torch.stack([f.obs for f in list_sample_data]).to(self.device)
-        legal_action = torch.stack([f.legal_action for f in list_sample_data]).to(self.device)
-        act = torch.stack([f.act for f in list_sample_data]).to(self.device).view(-1, 1)
-        old_prob = torch.stack([f.prob for f in list_sample_data]).to(self.device)
-        reward = torch.stack([f.reward for f in list_sample_data]).to(self.device)
-        advantage = torch.stack([f.advantage for f in list_sample_data]).to(self.device)
-        old_value = torch.stack([f.value for f in list_sample_data]).to(self.device)
-        reward_sum = torch.stack([f.reward_sum for f in list_sample_data]).to(self.device)
-        credit_weight = torch.stack([f.credit_weight for f in list_sample_data]).to(self.device)
+        if not list_sample_data:
+            return
+
+        obs = self._batch_tensor([sample.obs for sample in list_sample_data])
+        legal_action = self._batch_tensor([sample.legal_action for sample in list_sample_data])
+        act = self._batch_tensor([sample.act for sample in list_sample_data]).view(-1, 1)
+        old_prob = self._batch_tensor([sample.prob for sample in list_sample_data])
+        reward = self._batch_tensor([sample.reward for sample in list_sample_data])
+        advantage = self._batch_tensor([sample.advantage for sample in list_sample_data])
+        old_value = self._batch_tensor([sample.value for sample in list_sample_data])
+        reward_sum = self._batch_tensor([sample.reward_sum for sample in list_sample_data])
 
         self.model.set_train_mode()
         self.optimizer.zero_grad()
 
         logits, value_pred = self.model(obs)
-
         total_loss, info_list = self._compute_loss(
             logits=logits,
             value_pred=value_pred,
@@ -63,7 +60,6 @@ class Algorithm:
             advantage=advantage,
             old_value=old_value,
             reward_sum=reward_sum,
-            credit_weight=credit_weight,
         )
 
         total_loss.backward()
@@ -71,28 +67,9 @@ class Algorithm:
         self.optimizer.step()
         if self.scheduler is not None:
             self.scheduler.step()
-        self.train_step += 1
 
-        now = time.time()
-        if now - self.last_report_monitor_time >= 60:
-            results = {
-                "total_loss": round(total_loss.item(), 4),
-                "value_loss": round(info_list[0].item(), 4),
-                "policy_loss": round(info_list[1].item(), 4),
-                "entropy_loss": round(info_list[2].item(), 4),
-                "reward": round(reward.mean().item(), 4),
-                "credit_weight": round(credit_weight.mean().item(), 4),
-            }
-            if self.logger:
-                self.logger.info(
-                    f"[train] total_loss:{results['total_loss']} "
-                    f"policy_loss:{results['policy_loss']} "
-                    f"value_loss:{results['value_loss']} "
-                    f"entropy:{results['entropy_loss']}"
-                )
-            if self.monitor:
-                self.monitor.put_data({os.getpid(): results})
-            self.last_report_monitor_time = now
+        self.train_step += 1
+        self._report(total_loss, info_list, reward)
 
     def _compute_loss(
         self,
@@ -104,45 +81,68 @@ class Algorithm:
         advantage,
         old_value,
         reward_sum,
-        credit_weight,
     ):
-        """Compute standard PPO loss."""
         prob_dist = self._masked_softmax(logits, legal_action)
 
         one_hot = torch.nn.functional.one_hot(old_action[:, 0].long(), self.label_size).float()
-        new_prob = (one_hot * prob_dist).sum(1, keepdim=True)
-        old_action_prob = (one_hot * old_prob).sum(1, keepdim=True).clamp(1e-9)
+        new_prob = (one_hot * prob_dist).sum(dim=1, keepdim=True)
+        old_action_prob = (one_hot * old_prob).sum(dim=1, keepdim=True).clamp(1.0e-9)
         ratio = new_prob / old_action_prob
+
         adv = advantage.view(-1, 1)
-        adv = (adv - adv.mean()) / (adv.std(unbiased=False) + Config.ADV_NORM_EPS)
-        weight = credit_weight.view(-1, 1)
-        weight = weight / weight.mean().clamp(min=1e-6)
         policy_loss1 = -ratio * adv
         policy_loss2 = -ratio.clamp(1 - self.clip_param, 1 + self.clip_param) * adv
-        policy_loss = (torch.maximum(policy_loss1, policy_loss2) * weight).mean()
+        policy_loss = torch.maximum(policy_loss1, policy_loss2).mean()
 
         value_clip = old_value + (value_pred - old_value).clamp(-self.clip_param, self.clip_param)
-        value_loss = (
-            0.5
-            * torch.maximum(
-                torch.square(reward_sum - value_pred),
-                torch.square(reward_sum - value_clip),
-            )
-            * weight
-        )
-        value_loss = value_loss.mean()
-
-        entropy_loss = (
-            (-prob_dist * torch.log(prob_dist.clamp(1e-9, 1))).sum(1, keepdim=True) * weight
+        value_loss = 0.5 * torch.maximum(
+            torch.square(reward_sum - value_pred),
+            torch.square(reward_sum - value_clip),
         ).mean()
-        total_loss = self.vf_coef * value_loss + policy_loss - self.var_beta * entropy_loss
 
+        entropy_loss = (-prob_dist * torch.log(prob_dist.clamp(1.0e-9, 1.0))).sum(dim=1).mean()
+        total_loss = self.vf_coef * value_loss + policy_loss - self.var_beta * entropy_loss
         return total_loss, [value_loss, policy_loss, entropy_loss]
 
     def _masked_softmax(self, logits, legal_action):
-        """Softmax with legal action masking."""
+        legal_action = legal_action.clamp(0.0, 1.0)
         label_max, _ = torch.max(logits * legal_action, dim=1, keepdim=True)
         label = logits - label_max
         label = label * legal_action
-        label = label + 1e5 * (legal_action - 1)
+        label = label + 1.0e5 * (legal_action - 1.0)
         return torch.nn.functional.softmax(label, dim=1)
+
+    def _batch_tensor(self, values):
+        tensor_values = []
+        for value in values:
+            if isinstance(value, torch.Tensor):
+                tensor_values.append(value.detach().cpu().numpy())
+            else:
+                tensor_values.append(np.asarray(value, dtype=np.float32))
+        batch = np.asarray(tensor_values, dtype=np.float32)
+        return torch.as_tensor(batch, dtype=torch.float32, device=self.device)
+
+    def _report(self, total_loss, info_list, reward):
+        now = time.time()
+        if now - self.last_report_monitor_time < Config.MONITOR_REPORT_INTERVAL_SEC:
+            return
+
+        results = {
+            "total_loss": round(total_loss.item(), 4),
+            "value_loss": round(info_list[0].item(), 4),
+            "policy_loss": round(info_list[1].item(), 4),
+            "entropy_loss": round(info_list[2].item(), 4),
+            "reward": round(reward.mean().item(), 4),
+        }
+
+        if self.logger is not None:
+            self.logger.info(
+                f"[train] total_loss:{results['total_loss']} "
+                f"policy_loss:{results['policy_loss']} "
+                f"value_loss:{results['value_loss']} "
+                f"entropy:{results['entropy_loss']} "
+                f"reward:{results['reward']}"
+            )
+        if self.monitor is not None:
+            self.monitor.put_data({os.getpid(): results})
+        self.last_report_monitor_time = now
